@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ufmscertemailservice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ufms-cert-email-service
+    restart: "no"
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      # Set the real connection string via an untracked .env file or here on the server.
+      # NEVER commit real credentials to git.
+      - ConnectionStrings__OracleConnection=${ORACLE_CONNECTION_STRING}
+      - Email__Username=${SMTP_USERNAME}
+      - Email__Password=${SMTP_PASSWORD}
+    volumes:
+      - ./logs:/app/logs
+      - ./PDF:/app/PDF
+      - ./Excel:/app/Excel
+    networks:
+      - service-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  service-network:
+    driver: bridge

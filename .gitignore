@@ -1,0 +1,20 @@
+# Secrets - NEVER commit real credentials
+**/appsettings.Production.json
+
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio cache/state
+.vs/
+*.user
+*.suo
+
+# Runtime output
+[Ll]ogs/
+PDF/
+Excel/
+
+# Windows reserved-name accidents
+nul
+.env

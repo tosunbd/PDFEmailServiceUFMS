@@ -1,0 +1,393 @@
+================================================================================
+                    DEPLOYMENT & WINDOWS TASK SCHEDULER GUIDE
+                    PDFEmailService - .NET 10.0 Console Application
+================================================================================
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. Build Commands
+2. Publish Commands (Deployment)
+3. Deployment to Server
+4. Windows Task Scheduler Setup
+5. Troubleshooting
+6. Maintenance Commands
+
+================================================================================
+1. BUILD COMMANDS
+================================================================================
+
+Open Command Prompt or PowerShell in the project root directory.
+
+--- Debug Build ---
+dotnet build -c Debug
+
+--- Release Build ---
+dotnet build -c Release
+
+--- Clean and Rebuild ---
+dotnet clean
+dotnet build -c Release
+
+--- Restore Packages (if needed) ---
+dotnet restore
+
+================================================================================
+2. PUBLISH COMMANDS (DEPLOYMENT)
+================================================================================
+
+Choose ONE of the following publish options based on your needs:
+
+-------------------------------------------------------------------------------
+OPTION A: Framework-Dependent Deployment (Recommended - Smaller Size)
+-------------------------------------------------------------------------------
+Requires .NET 10 Runtime installed on target server.
+
+dotnet publish -c Release -o "C:\Publish\PDFEmailService"
+
+Output: ~5-10 MB
+Requires: .NET 10 Runtime on server
+
+-------------------------------------------------------------------------------
+OPTION B: Self-Contained Deployment (No Runtime Required)
+-------------------------------------------------------------------------------
+Includes .NET runtime - works without installing .NET on server.
+
+For 64-bit Windows:
+dotnet publish -c Release -r win-x64 --self-contained -o "C:\Publish\PDFEmailService"
+
+For 32-bit Windows:
+dotnet publish -c Release -r win-x86 --self-contained -o "C:\Publish\PDFEmailService"
+
+Output: ~80-150 MB
+Requires: Nothing additional on server
+
+-------------------------------------------------------------------------------
+OPTION C: Single File Deployment (One Executable)
+-------------------------------------------------------------------------------
+Creates a single .exe file with everything bundled.
+
+dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o "C:\Publish\PDFEmailService"
+
+Output: Single .exe file (~80-150 MB)
+Requires: Nothing additional on server
+
+-------------------------------------------------------------------------------
+OPTION D: Trimmed Single File (Smallest Size)
+-------------------------------------------------------------------------------
+Removes unused code for smallest possible size.
+
+dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishTrimmed=true -o "C:\Publish\PDFEmailService"
+
+WARNING: May cause issues with reflection-based code. Test thoroughly.
+
+================================================================================
+3. DEPLOYMENT TO SERVER
+================================================================================
+
+STEP 1: Create Deployment Folder on Server
+------------------------------------------
+Create folder: C:\Services\PDFEmailService
+
+STEP 2: Copy Published Files
+------------------------------------------
+Copy all files from publish output to server:
+
+From: C:\Publish\PDFEmailService\*
+To:   \\SERVER\C$\Services\PDFEmailService\
+
+Or use xcopy/robocopy:
+robocopy "C:\Publish\PDFEmailService" "\\SERVER\C$\Services\PDFEmailService" /E /MIR
+
+STEP 3: Verify Folder Structure on Server
+------------------------------------------
+C:\Services\PDFEmailService\
+├── PDFEmailService.exe          (or PDFEmailService.dll for framework-dependent)
+├── PDFEmailService.dll
+├── PDFEmailService.runtimeconfig.json
+├── appsettings.json             (IMPORTANT: Update settings for production!)
+├── RDLC\
+│   └── rptRSPortfolioLastHU.rdlc
+├── logs\                        (created automatically)
+└── PDF\                         (created automatically)
+
+STEP 4: Update appsettings.json for Production
+------------------------------------------
+Edit C:\Services\PDFEmailService\appsettings.json
+
+Update these values:
+- ConnectionStrings:OracleConnection (production database)
+- Email:SmtpServer (production SMTP)
+- Email:Username/Password (production credentials)
+- Email:FromAddress (production email)
+- Application:TestAccounts (remove or update for production)
+
+STEP 5: Test Run Manually
+------------------------------------------
+Open Command Prompt as Administrator on the server:
+
+cd C:\Services\PDFEmailService
+PDFEmailService.exe
+
+Or for framework-dependent:
+dotnet PDFEmailService.dll
+
+Verify:
+- Application starts without errors
+- Connects to database
+- Generates PDFs
+- Sends emails
+- Creates log files in logs\ folder
+
+================================================================================
+4. WINDOWS TASK SCHEDULER SETUP
+================================================================================
+
+METHOD A: Using Task Scheduler GUI
+==================================
+
+STEP 1: Open Task Scheduler
+------------------------------------------
+- Press Win + R
+- Type: taskschd.msc
+- Press Enter
+
+STEP 2: Create New Task
+------------------------------------------
+- Right-click "Task Scheduler Library"
+- Select "Create Task..." (NOT "Create Basic Task")
+
+STEP 3: General Tab
+------------------------------------------
+Name: PDFEmailService
+Description: Generates portfolio PDFs and sends emails to investors
+
+Security Options:
+[x] Run whether user is logged on or not
+[x] Run with highest privileges
+[ ] Hidden (optional)
+
+Configure for: Windows Server 2019 (or your server version)
+
+STEP 4: Triggers Tab
+------------------------------------------
+Click "New..." to add trigger
+
+Begin the task: On a schedule
+
+Settings (choose one):
+- Daily: Run every day at specific time
+- Weekly: Run on specific days
+- Monthly: Run on specific dates
+
+Example - Daily at 6:00 AM:
+[x] Daily
+Start: [Today's Date] 6:00:00 AM
+Recur every: 1 days
+
+Advanced settings:
+[x] Enabled
+
+Click OK
+
+STEP 5: Actions Tab
+------------------------------------------
+Click "New..." to add action
+
+Action: Start a program
+
+Program/script: C:\Services\PDFEmailService\PDFEmailService.exe
+
+Add arguments (optional): (leave blank)
+
+Start in (optional): C:\Services\PDFEmailService
+
+Click OK
+
+STEP 6: Conditions Tab
+------------------------------------------
+Power:
+[ ] Start the task only if the computer is on AC power (UNCHECK this)
+
+Network:
+[x] Start only if the following network connection is available
+    Select: Any connection
+
+STEP 7: Settings Tab
+------------------------------------------
+[x] Allow task to be run on demand
+[x] Run task as soon as possible after a scheduled start is missed
+[ ] Stop the task if it runs longer than: (uncheck or set to 4 hours)
+[x] If the running task does not end when requested, force it to stop
+[ ] If the task is already running: Do not start a new instance
+
+Click OK
+
+STEP 8: Enter Credentials
+------------------------------------------
+Enter username and password for the account that will run the task.
+Use a service account with:
+- Network access to database server
+- Permission to send emails via SMTP
+- Write access to C:\Services\PDFEmailService\
+
+-------------------------------------------------------------------------------
+
+METHOD B: Using PowerShell (Automated Setup)
+============================================
+
+Open PowerShell as Administrator and run:
+
+# Variables - MODIFY THESE
+$TaskName = "PDFEmailService"
+$TaskDescription = "Generates portfolio PDFs and sends emails to investors"
+$ExePath = "C:\Services\PDFEmailService\PDFEmailService.exe"
+$WorkingDir = "C:\Services\PDFEmailService"
+$RunTime = "06:00"  # 6:00 AM
+$UserName = "DOMAIN\ServiceAccount"  # Change to your service account
+
+# Create the scheduled task action
+$Action = New-ScheduledTaskAction -Execute $ExePath -WorkingDirectory $WorkingDir
+
+# Create trigger - Daily at specified time
+$Trigger = New-ScheduledTaskTrigger -Daily -At $RunTime
+
+# Create settings
+$Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable
+
+# Create principal (run with highest privileges)
+$Principal = New-ScheduledTaskPrincipal -UserId $UserName -LogonType Password -RunLevel Highest
+
+# Register the task
+Register-ScheduledTask -TaskName $TaskName -Description $TaskDescription -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal
+
+Write-Host "Task '$TaskName' created successfully!"
+
+-------------------------------------------------------------------------------
+
+METHOD C: Using Command Line (schtasks)
+=======================================
+
+Open Command Prompt as Administrator:
+
+--- Create Daily Task at 6:00 AM ---
+schtasks /create /tn "PDFEmailService" /tr "C:\Services\PDFEmailService\PDFEmailService.exe" /sc daily /st 06:00 /ru "DOMAIN\ServiceAccount" /rp "Password" /rl highest
+
+--- Create Weekly Task (Monday, Wednesday, Friday at 7:00 AM) ---
+schtasks /create /tn "PDFEmailService" /tr "C:\Services\PDFEmailService\PDFEmailService.exe" /sc weekly /d MON,WED,FRI /st 07:00 /ru "DOMAIN\ServiceAccount" /rp "Password" /rl highest
+
+--- Create Monthly Task (1st of every month at 8:00 AM) ---
+schtasks /create /tn "PDFEmailService" /tr "C:\Services\PDFEmailService\PDFEmailService.exe" /sc monthly /d 1 /st 08:00 /ru "DOMAIN\ServiceAccount" /rp "Password" /rl highest
+
+================================================================================
+5. TROUBLESHOOTING
+================================================================================
+
+ISSUE: Task runs but application fails
+--------------------------------------
+1. Check logs: C:\Services\PDFEmailService\logs\
+2. Run manually to see errors:
+   cd C:\Services\PDFEmailService
+   PDFEmailService.exe
+
+ISSUE: Task doesn't start
+--------------------------------------
+1. Check Task Scheduler History (enable if disabled)
+2. Verify service account has "Log on as batch job" right
+3. Check Event Viewer > Windows Logs > Application
+
+ISSUE: "Access Denied" errors
+--------------------------------------
+1. Run Task Scheduler as Administrator
+2. Verify service account permissions
+3. Check folder permissions on C:\Services\PDFEmailService\
+
+ISSUE: Database connection fails
+--------------------------------------
+1. Verify Oracle connection string in appsettings.json
+2. Test network connectivity to database server
+3. Check if Oracle client/drivers are accessible
+
+ISSUE: Email sending fails
+--------------------------------------
+1. Verify SMTP settings in appsettings.json
+2. Test SMTP connectivity: telnet smtp.server.com 587
+3. Check firewall rules for SMTP port
+
+ISSUE: PDF generation fails
+--------------------------------------
+1. Verify RDLC files exist in RDLC\ folder
+2. Check if fonts are installed on server
+3. Review logs for specific error messages
+
+--- Enable Task History ---
+In Task Scheduler:
+1. Click "Task Scheduler Library"
+2. Right panel > Actions > "Enable All Tasks History"
+
+--- View Task History ---
+1. Select your task
+2. Click "History" tab at bottom
+
+================================================================================
+6. MAINTENANCE COMMANDS
+================================================================================
+
+--- Run Task Manually ---
+schtasks /run /tn "PDFEmailService"
+
+--- Check Task Status ---
+schtasks /query /tn "PDFEmailService" /v /fo list
+
+--- Disable Task ---
+schtasks /change /tn "PDFEmailService" /disable
+
+--- Enable Task ---
+schtasks /change /tn "PDFEmailService" /enable
+
+--- Delete Task ---
+schtasks /delete /tn "PDFEmailService" /f
+
+--- Change Schedule (to 7:00 AM) ---
+schtasks /change /tn "PDFEmailService" /st 07:00
+
+--- View All Scheduled Tasks ---
+schtasks /query /fo table
+
+--- Export Task (Backup) ---
+schtasks /query /tn "PDFEmailService" /xml > PDFEmailService_Task_Backup.xml
+
+--- Import Task (Restore) ---
+schtasks /create /tn "PDFEmailService" /xml PDFEmailService_Task_Backup.xml
+
+--- Clean Old Logs (keep last 30 days) ---
+forfiles /p "C:\Services\PDFEmailService\logs" /s /m *.log /d -30 /c "cmd /c del @path"
+
+--- Clean Old PDFs (keep last 7 days) ---
+forfiles /p "C:\Services\PDFEmailService\PDF" /s /m *.pdf /d -7 /c "cmd /c del @path"
+
+================================================================================
+QUICK REFERENCE CARD
+================================================================================
+
+PUBLISH (Self-Contained):
+dotnet publish -c Release -r win-x64 --self-contained -o "C:\Publish\PDFEmailService"
+
+DEPLOY:
+robocopy "C:\Publish\PDFEmailService" "C:\Services\PDFEmailService" /E /MIR
+
+CREATE TASK (Daily 6 AM):
+schtasks /create /tn "PDFEmailService" /tr "C:\Services\PDFEmailService\PDFEmailService.exe" /sc daily /st 06:00 /ru "SYSTEM" /rl highest
+
+RUN NOW:
+schtasks /run /tn "PDFEmailService"
+
+CHECK STATUS:
+schtasks /query /tn "PDFEmailService"
+
+VIEW LOGS:
+type C:\Services\PDFEmailService\logs\pdfemailservice-*.log
+
+================================================================================
+                              END OF DOCUMENT
+================================================================================

@@ -1,0 +1,1168 @@
+================================================================================
+                    .NET UPGRADE IMPLEMENTATION GUIDE
+                    Windows Forms to Console Application
+                    With Clean Architecture & Docker Support
+================================================================================
+
+Project: PDFEmailService
+Upgraded From: .NET 7.0 Windows Forms
+Upgraded To: .NET 10.0 Console Application
+Date: January 2026
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. Overview of Changes
+2. Project File Changes (.csproj)
+3. Folder Structure
+4. Configuration (appsettings.json)
+5. Interfaces (All in Repositories/IRepository)
+6. Data Layer
+7. Repository Layer
+8. Service Layer
+9. Program.cs (Entry Point)
+10. Docker Implementation
+11. Testing Email Override
+12. Build & Run Commands
+13. Migration Checklist
+14. SQL QUERY OPTIMIZATION (NEW)
+15. Performance Best Practices (NEW)
+
+================================================================================
+1. OVERVIEW OF CHANGES
+================================================================================
+
+BEFORE:
+- Windows Forms Application (.NET 7.0)
+- Single monolithic class with all logic
+- Hardcoded configuration values
+- System.Net.Mail for email
+- Synchronous database calls
+- No dependency injection
+- No logging framework
+- Multiple redundant SQL queries
+
+AFTER:
+- Console Application (.NET 10.0)
+- Clean Architecture with separation of concerns
+- appsettings.json with Options pattern
+- MailKit with Polly retry policies
+- Async/await database operations
+- Full dependency injection
+- Serilog logging
+- Docker support
+- Consolidated SQL queries with parallel execution
+
+================================================================================
+2. PROJECT FILE CHANGES (.csproj)
+================================================================================
+
+BEFORE:
+-------
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="3.21.130" />
+    <PackageReference Include="ReportViewerCore.WinForms" Version="15.1.19" />
+  </ItemGroup>
+</Project>
+
+AFTER (Latest Stable Packages as of January 2026):
+--------------------------------------------------
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.2" />
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog" Version="4.3.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+
+    <!-- Email -->
+    <PackageReference Include="MailKit" Version="4.14.1" />
+    <PackageReference Include="Polly" Version="8.6.5" />
+
+    <!-- Database -->
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.0" />
+
+    <!-- Reporting -->
+    <PackageReference Include="ReportViewerCore.NETCore" Version="15.1.33" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="RDLC\*.rdlc">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>
+
+================================================================================
+3. FOLDER STRUCTURE
+================================================================================
+
+ProjectRoot/
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
+├── UPGRADE_GUIDE_NET10_CleanArchitecture.txt
+├── ProjectName.sln
+│
+└── ProjectName/
+    ├── Configuration/                # Options/Settings classes
+    │   ├── ApplicationSettings.cs
+    │   ├── EmailSettings.cs
+    │   └── RetryPolicySettings.cs
+    │
+    ├── Data/                         # Data access infrastructure
+    │   └── OracleConnectionFactory.cs
+    │
+    ├── Repositories/                 # Data access layer
+    │   ├── IRepository/              # ALL INTERFACES GO HERE
+    │   │   ├── IPortfolioRepository.cs
+    │   │   ├── IOracleConnectionFactory.cs
+    │   │   ├── IEmailService.cs
+    │   │   ├── IPdfGenerationService.cs
+    │   │   └── IEmailWorkflowService.cs
+    │   └── PortfolioRepository.cs    # Repository implementation
+    │
+    ├── Services/                     # Business logic layer
+    │   ├── EmailValidator.cs
+    │   ├── EmailWorkerService.cs     # BackgroundService
+    │   ├── EmailWorkflowService.cs   # Workflow orchestrator
+    │   ├── MailKitEmailService.cs    # Email implementation
+    │   └── PdfGenerationService.cs   # PDF generation
+    │
+    ├── RDLC/                         # Report templates
+    │   └── *.rdlc
+    │
+    ├── Program.cs                    # Entry point with DI
+    └── appsettings.json              # Configuration file
+
+================================================================================
+4. CONFIGURATION (appsettings.json)
+================================================================================
+
+{
+  "ConnectionStrings": {
+    "OracleConnection": "Data Source=(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=TCP)(HOST=192.168.1.21)(PORT=1521)))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME=ORCL)));User Id=YOUR_DB_USER;Password=YOUR_DB_PASSWORD"
+  },
+  "Email": {
+    "SmtpServer": "smtp.example.com",
+    "Port": 587,
+    "EnableSsl": true,
+    "UseDefaultCredentials": false,
+    "Username": "your-email@example.com",
+    "Password": "your-password",
+    "FromAddress": "noreply@example.com",
+    "SubjectTemplate": "Portfolio Statement Account No.: ( {0} )",
+    "BodyTemplate": "This is an automatically generated message."
+  },
+  "RetryPolicy": {
+    "MaxRetryAttempts": 3,
+    "InitialDelaySeconds": 2,
+    "MaxDelaySeconds": 30,
+    "BackoffMultiplier": 2.0
+  },
+  "Application": {
+    "BranchCode": 1,
+    "PdfOutputPath": "PDF",
+    "LogOutputPath": "logs",
+    "TestAccounts": [
+      {
+        "AccountNo": "12345",
+        "Email": "test@example.com"
+      }
+    ]
+  },
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "System": "Warning"
+      }
+    }
+  }
+}
+
+================================================================================
+5. INTERFACES (All in Repositories/IRepository)
+================================================================================
+
+Location: Repositories/IRepository/
+Namespace: ProjectName.Repositories.IRepository
+
+ALL interfaces are consolidated in a single location for consistency.
+
+--- IOracleConnectionFactory.cs ---
+using Oracle.ManagedDataAccess.Client;
+
+namespace ProjectName.Repositories.IRepository;
+
+public interface IOracleConnectionFactory
+{
+    OracleConnection CreateConnection();
+}
+
+--- IEmailService.cs ---
+namespace ProjectName.Repositories.IRepository;
+
+public interface IEmailService
+{
+    Task<EmailResult> SendEmailAsync(
+        IEnumerable<(byte[] Content, string FileName)> attachments,
+        string toAddress,
+        string subject,
+        string body,
+        CancellationToken cancellationToken = default);
+}
+
+public record EmailResult(bool Success, string Message);
+
+--- IPdfGenerationService.cs ---
+namespace ProjectName.Repositories.IRepository;
+
+public interface IPdfGenerationService
+{
+    Task<byte[]> GeneratePortfolioPdfAsync(int branchCode, string accountNo, CancellationToken cancellationToken = default);
+}
+
+--- IEmailWorkflowService.cs ---
+namespace ProjectName.Repositories.IRepository;
+
+public interface IEmailWorkflowService
+{
+    Task ExecuteAsync(CancellationToken cancellationToken = default);
+}
+
+--- IPortfolioRepository.cs (OPTIMIZED) ---
+using System.Data;
+
+namespace ProjectName.Repositories.IRepository;
+
+public interface IPortfolioRepository
+{
+    Task<DataTable?> GetAccountDetailAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consolidated query for portfolio summary from v_portfolio_all view.
+    /// Returns: urgain, urloss, asset_val_all, asset_val_margin
+    /// </summary>
+    Task<DataTable?> GetPortfolioSummaryAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consolidated query for transaction orders.
+    /// Returns: fund_withdraw, collection_in_transit
+    /// </summary>
+    Task<DataTable?> GetTransactionSummaryAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consolidated query for account balance from dprofile.
+    /// Returns: accured_interest, mbal
+    /// </summary>
+    Task<DataTable?> GetAccountBalanceAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    Task<DataTable?> GetPurchasePowerAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consolidated query for financial view data.
+    /// Returns: applied_interest, earned_div_income
+    /// </summary>
+    Task<DataTable?> GetFinancialSummaryAsync(int accountNo, CancellationToken cancellationToken = default);
+
+    Task<DataTable?> GetReceivableFundAsync(int accountNo, CancellationToken cancellationToken = default);
+    Task<DataTable?> GetIPOBlockBalanceAsync(int accountNo, CancellationToken cancellationToken = default);
+    Task<DataTable?> GetReceivableDividendAsync(int accountNo, CancellationToken cancellationToken = default);
+    Task<DataTable?> GetLoanRatioAsync(CancellationToken cancellationToken = default);
+    Task<DataTable?> GetMarginDepositAsync(int accountNo, CancellationToken cancellationToken = default);
+    Task<DataTable?> GetAccountEmailAsync(CancellationToken cancellationToken = default);
+}
+
+================================================================================
+6. DATA LAYER
+================================================================================
+
+Location: Data/
+
+--- OracleConnectionFactory.cs ---
+using Microsoft.Extensions.Configuration;
+using Oracle.ManagedDataAccess.Client;
+using ProjectName.Repositories.IRepository;
+
+namespace ProjectName.Data;
+
+public class OracleConnectionFactory : IOracleConnectionFactory
+{
+    private readonly string _connectionString;
+
+    public OracleConnectionFactory(IConfiguration configuration)
+    {
+        _connectionString = configuration.GetConnectionString("OracleConnection")
+            ?? throw new InvalidOperationException("Oracle connection string not found.");
+    }
+
+    public OracleConnection CreateConnection()
+    {
+        return new OracleConnection(_connectionString);
+    }
+}
+
+================================================================================
+7. REPOSITORY LAYER
+================================================================================
+
+Location: Repositories/IRepository/ (all interfaces)
+Location: Repositories/ (implementations)
+
+--- PortfolioRepository.cs (OPTIMIZED) ---
+using System.Data;
+using Microsoft.Extensions.Logging;
+using Oracle.ManagedDataAccess.Client;
+using ProjectName.Repositories.IRepository;
+
+namespace ProjectName.Repositories;
+
+public class PortfolioRepository : IPortfolioRepository
+{
+    private readonly IOracleConnectionFactory _connectionFactory;
+    private readonly ILogger<PortfolioRepository> _logger;
+
+    public PortfolioRepository(IOracleConnectionFactory connectionFactory, ILogger<PortfolioRepository> logger)
+    {
+        _connectionFactory = connectionFactory;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Consolidated query for portfolio summary from v_portfolio_all view.
+    /// Replaces: GetUrGainAsync, GetUrLossAsync, GetEquityAssetValueAllAsync,
+    ///           GetEquityAssetValueMarginableAsync, GetAssetValueAsync (5 queries -> 1)
+    /// </summary>
+    public async Task<DataTable?> GetPortfolioSummaryAsync(int accountNo, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                NVL(SUM(CASE WHEN ur_gain > 0 THEN ur_gain ELSE 0 END), 0) AS urgain,
+                NVL(SUM(CASE WHEN ur_gain < 0 THEN ur_gain ELSE 0 END), 0) AS urloss,
+                NVL(SUM(m_val), 0) AS asset_val_all,
+                NVL(SUM(CASE WHEN margin_nonmargin = 'M' THEN m_val ELSE 0 END), 0) AS asset_val_margin
+            FROM invest.v_portfolio_all
+            WHERE accnt_no = :accnt_no";
+
+        return await ExecuteQueryAsync(sql, new[] { new OracleParameter("accnt_no", accountNo) }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Consolidated query for transaction orders.
+    /// Replaces: GetFundWithdrawalAsync, GetFundWithdrawalOrderAsync, GetCollectionInTransitAsync (3 queries -> 1)
+    /// </summary>
+    public async Task<DataTable?> GetTransactionSummaryAsync(int accountNo, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                NVL(SUM(CASE WHEN tr_cd = 'WF' AND dr_cr = 'D' THEN amount ELSE 0 END), 0) AS fund_withdraw,
+                NVL(SUM(CASE WHEN tr_cd = 'AD' THEN amount ELSE 0 END), 0) AS collection_in_transit
+            FROM invest.trans_ord
+            WHERE accnt_no = :accnt_no";
+
+        return await ExecuteQueryAsync(sql, new[] { new OracleParameter("accnt_no", accountNo) }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Consolidated query for account balance from dprofile.
+    /// Replaces: GetAccruedInterestAsync, GetCFmbalAsync (2 queries -> 1)
+    /// </summary>
+    public async Task<DataTable?> GetAccountBalanceAsync(int accountNo, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                NVL(interest, 0) AS accured_interest,
+                NVL(cur_bal, 0) AS mbal
+            FROM invest.dprofile
+            WHERE accnt_no = :accnt_no";
+
+        return await ExecuteQueryAsync(sql, new[] { new OracleParameter("accnt_no", accountNo) }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Consolidated query for financial view data.
+    /// Replaces: GetAppliedInterestAsync, GetEarnedDivIncomeAsync (2 queries -> 1)
+    /// </summary>
+    public async Task<DataTable?> GetFinancialSummaryAsync(int accountNo, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+            SELECT
+                ABS(NVL(SUM(CASE WHEN tr_cd IN ('INT', 'DMT', 'CFS', 'CSTD') AND dr_cr = 'D' AND vouch_dt >= DATE '2022-07-01' THEN amount ELSE 0 END), 0)) AS applied_interest,
+                NVL(SUM(CASE WHEN tr_cd IN ('FDIV', 'IDIV', 'BNS') AND dr_cr = 'C' AND vouch_dt >= DATE '2022-07-01' THEN amount ELSE 0 END), 0) AS earned_div_income
+            FROM invest.fin_view
+            WHERE accnt_no = :accnt_no";
+
+        return await ExecuteQueryAsync(sql, new[] { new OracleParameter("accnt_no", accountNo) }, cancellationToken);
+    }
+
+    private async Task<DataTable?> ExecuteQueryAsync(string sql, OracleParameter[] parameters, CancellationToken cancellationToken)
+    {
+        var dt = new DataTable();
+        try
+        {
+            using var conn = _connectionFactory.CreateConnection();
+            await conn.OpenAsync(cancellationToken);
+
+            using var cmd = new OracleCommand(sql, conn);
+            cmd.BindByName = true;
+            cmd.Parameters.AddRange(parameters);
+
+            using var adapter = new OracleDataAdapter(cmd);
+            await Task.Run(() => adapter.Fill(dt), cancellationToken);
+
+            return dt.Rows.Count > 0 ? dt : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error executing query");
+            throw;
+        }
+    }
+}
+
+================================================================================
+8. SERVICE LAYER
+================================================================================
+
+Location: Services/
+
+--- EmailValidator.cs ---
+using System.Text.RegularExpressions;
+
+namespace ProjectName.Services;
+
+public static partial class EmailValidator
+{
+    [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 200)]
+    private static partial Regex EmailRegex();
+
+    public static bool IsValidEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+        try
+        {
+            return EmailRegex().IsMatch(email.Trim());
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+}
+
+--- MailKitEmailService.cs (with Polly retry) ---
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MimeKit;
+using ProjectName.Repositories.IRepository;
+using ProjectName.Configuration;
+using Polly;
+using Polly.Retry;
+
+namespace ProjectName.Services;
+
+public class MailKitEmailService : IEmailService
+{
+    private readonly EmailSettings _emailSettings;
+    private readonly RetryPolicySettings _retrySettings;
+    private readonly ILogger<MailKitEmailService> _logger;
+    private readonly ResiliencePipeline _retryPipeline;
+
+    public MailKitEmailService(
+        IOptions<EmailSettings> emailSettings,
+        IOptions<RetryPolicySettings> retrySettings,
+        ILogger<MailKitEmailService> logger)
+    {
+        _emailSettings = emailSettings.Value;
+        _retrySettings = retrySettings.Value;
+        _logger = logger;
+        _retryPipeline = BuildRetryPipeline();
+    }
+
+    private ResiliencePipeline BuildRetryPipeline()
+    {
+        return new ResiliencePipelineBuilder()
+            .AddRetry(new RetryStrategyOptions
+            {
+                MaxRetryAttempts = _retrySettings.MaxRetryAttempts,
+                Delay = TimeSpan.FromSeconds(_retrySettings.InitialDelaySeconds),
+                MaxDelay = TimeSpan.FromSeconds(_retrySettings.MaxDelaySeconds),
+                BackoffType = DelayBackoffType.Exponential,
+                UseJitter = true,
+                ShouldHandle = new PredicateBuilder()
+                    .Handle<SmtpCommandException>()
+                    .Handle<SmtpProtocolException>()
+                    .Handle<IOException>()
+                    .Handle<TimeoutException>(),
+                OnRetry = args =>
+                {
+                    _logger.LogWarning(args.Outcome.Exception,
+                        "Email attempt {Attempt} failed. Retrying...",
+                        args.AttemptNumber + 1);
+                    return ValueTask.CompletedTask;
+                }
+            })
+            .Build();
+    }
+
+    public async Task<EmailResult> SendEmailAsync(
+        IEnumerable<(byte[] Content, string FileName)> attachments,
+        string toAddress, string subject, string body,
+        CancellationToken cancellationToken = default)
+    {
+        if (!EmailValidator.IsValidEmail(toAddress))
+            return new EmailResult(false, "Invalid email address");
+
+        try
+        {
+            await _retryPipeline.ExecuteAsync(async token =>
+            {
+                await SendEmailInternalAsync(attachments, toAddress, subject, body, token);
+            }, cancellationToken);
+
+            return new EmailResult(true, "Success");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send email to {Email}", toAddress);
+            return new EmailResult(false, $"Failure: {ex.Message}");
+        }
+    }
+
+    private async Task SendEmailInternalAsync(
+        IEnumerable<(byte[] Content, string FileName)> attachments,
+        string toAddress, string subject, string body,
+        CancellationToken cancellationToken)
+    {
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(_emailSettings.FromAddress));
+        message.To.Add(MailboxAddress.Parse(toAddress.Trim()));
+        message.Subject = subject;
+
+        var builder = new BodyBuilder { HtmlBody = body };
+        foreach (var (content, fileName) in attachments)
+        {
+            if (content?.Length > 0)
+                builder.Attachments.Add(fileName, content, new ContentType("application", "pdf"));
+        }
+        message.Body = builder.ToMessageBody();
+
+        using var client = new SmtpClient();
+        var secureSocketOptions = _emailSettings.EnableSsl
+            ? SecureSocketOptions.StartTls : SecureSocketOptions.None;
+
+        await client.ConnectAsync(_emailSettings.SmtpServer, _emailSettings.Port,
+            secureSocketOptions, cancellationToken);
+
+        if (!_emailSettings.UseDefaultCredentials && !string.IsNullOrEmpty(_emailSettings.Username))
+            await client.AuthenticateAsync(_emailSettings.Username, _emailSettings.Password, cancellationToken);
+
+        await client.SendAsync(message, cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+}
+
+--- EmailWorkerService.cs (BackgroundService) ---
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using ProjectName.Repositories.IRepository;
+
+namespace ProjectName.Services;
+
+public class EmailWorkerService : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly ILogger<EmailWorkerService> _logger;
+
+    public EmailWorkerService(
+        IServiceScopeFactory scopeFactory,
+        IHostApplicationLifetime applicationLifetime,
+        ILogger<EmailWorkerService> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _applicationLifetime = applicationLifetime;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("Service starting at {Time}", DateTimeOffset.Now);
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var workflow = scope.ServiceProvider.GetRequiredService<IEmailWorkflowService>();
+            await workflow.ExecuteAsync(stoppingToken);
+            _logger.LogInformation("Service completed at {Time}", DateTimeOffset.Now);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Service was cancelled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Service failed");
+        }
+        finally
+        {
+            _logger.LogInformation("Service shutting down");
+            _applicationLifetime.StopApplication();
+        }
+    }
+}
+
+================================================================================
+9. PROGRAM.CS (Entry Point)
+================================================================================
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using ProjectName.Configuration;
+using ProjectName.Data;
+using ProjectName.Repositories;
+using ProjectName.Repositories.IRepository;
+using ProjectName.Services;
+using Serilog;
+
+// Bootstrap logger
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
+
+try
+{
+    Log.Information("Starting service");
+
+    var builder = Host.CreateApplicationBuilder(args);
+
+    // Configure Serilog
+    builder.Services.AddSerilog((services, lc) => lc
+        .ReadFrom.Configuration(builder.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .Enrich.WithMachineName()
+        .Enrich.WithThreadId()
+        .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+        .WriteTo.File(
+            path: "logs/service-.log",
+            rollingInterval: RollingInterval.Day,
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{ThreadId}] {Message:lj}{NewLine}{Exception}"));
+
+    // Configure options
+    builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
+    builder.Services.Configure<RetryPolicySettings>(builder.Configuration.GetSection("RetryPolicy"));
+    builder.Services.Configure<ApplicationSettings>(builder.Configuration.GetSection("Application"));
+
+    // Register data access
+    builder.Services.AddSingleton<IOracleConnectionFactory, OracleConnectionFactory>();
+
+    // Register repositories
+    builder.Services.AddScoped<IPortfolioRepository, PortfolioRepository>();
+
+    // Register services
+    builder.Services.AddScoped<IEmailService, MailKitEmailService>();
+    builder.Services.AddScoped<IPdfGenerationService, PdfGenerationService>();
+    builder.Services.AddScoped<IEmailWorkflowService, EmailWorkflowService>();
+
+    // Register hosted service
+    builder.Services.AddHostedService<EmailWorkerService>();
+
+    var host = builder.Build();
+    await host.RunAsync();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "Service terminated unexpectedly");
+}
+finally
+{
+    Log.CloseAndFlush();
+}
+
+================================================================================
+10. DOCKER IMPLEMENTATION
+================================================================================
+
+--- Dockerfile ---
+# Build stage
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+WORKDIR /src
+
+COPY ProjectName/ProjectName.csproj ProjectName/
+RUN dotnet restore ProjectName/ProjectName.csproj
+
+COPY . .
+WORKDIR /src/ProjectName
+RUN dotnet build ProjectName.csproj -c Release -o /app/build
+
+# Publish stage
+FROM build AS publish
+RUN dotnet publish ProjectName.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS runtime
+WORKDIR /app
+
+# Install fonts for PDF generation
+RUN apt-get update && apt-get install -y \
+    libgdiplus libc6-dev fontconfig fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /app/logs /app/PDF
+
+COPY --from=publish /app/publish .
+COPY ProjectName/RDLC /app/RDLC
+
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+ENTRYPOINT ["dotnet", "ProjectName.dll"]
+
+--- docker-compose.yml ---
+version: '3.8'
+
+services:
+  projectname:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: project-service
+    restart: "no"
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - ConnectionStrings__OracleConnection=Your_Connection_String_Here
+    volumes:
+      - ./logs:/app/logs
+      - ./PDF:/app/PDF
+      - ./ProjectName/appsettings.json:/app/appsettings.json:ro
+    networks:
+      - service-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  service-network:
+    driver: bridge
+
+--- .dockerignore ---
+**/bin/
+**/obj/
+.vs/
+.git/
+logs/
+PDF/
+Dockerfile*
+docker-compose*
+*.md
+
+================================================================================
+11. TESTING EMAIL OVERRIDE
+================================================================================
+
+Location: Services/EmailWorkflowService.cs
+Lines: 74-88
+
+To test with your email, modify the loop in the ExecuteAsync method:
+
+BEFORE (Production - processes all accounts):
+for (int i = 0; i < accountEmails.Rows.Count; i++)
+{
+    var accountNo = accountEmails.Rows[i]["ACCNT_NO"].ToString()?.Trim() ?? "";
+    var accountEmail = accountEmails.Rows[i]["EMAIL_NO"].ToString()?.Trim() ?? "";
+
+AFTER (Testing - single account):
+//for (int i = 0; i < accountEmails.Rows.Count; i++)
+for (int i = 0; i < 1; i++)
+{
+    //var accountNo = accountEmails.Rows[i]["ACCNT_NO"].ToString()?.Trim() ?? "";
+    //var accountEmail = accountEmails.Rows[i]["EMAIL_NO"].ToString()?.Trim() ?? "";
+
+    var accountNo = "40415";
+    var accountEmail = "your-test-email@example.com";
+
+Steps:
+1. Comment out the production loop and variable assignments
+2. Set your test account number and email
+3. Run the application
+4. Restore original code when done testing
+
+================================================================================
+12. BUILD & RUN COMMANDS
+================================================================================
+
+--- Local Development ---
+dotnet restore
+dotnet build -c Release
+dotnet run --project ProjectName/ProjectName.csproj
+
+--- Docker ---
+docker-compose build
+docker-compose up
+docker-compose up -d          # Detached mode
+docker-compose logs -f        # View logs
+docker-compose down           # Stop
+
+--- Publish ---
+dotnet publish -c Release -r win-x64 --self-contained
+
+================================================================================
+13. MIGRATION CHECKLIST
+================================================================================
+
+[ ] 1. Update .csproj file
+    [ ] Change OutputType from WinExe to Exe
+    [ ] Update TargetFramework
+    [ ] Remove UseWindowsForms
+    [ ] Add new package references
+
+[ ] 2. Create folder structure
+    [ ] Configuration/
+    [ ] Data/
+    [ ] Repositories/IRepository/  (all interfaces go here)
+    [ ] Services/
+
+[ ] 3. Create appsettings.json
+    [ ] Connection strings
+    [ ] Email settings
+    [ ] Retry policy settings
+    [ ] Application settings
+    [ ] Serilog settings
+
+[ ] 4. Create Configuration classes
+    [ ] EmailSettings.cs
+    [ ] RetryPolicySettings.cs
+    [ ] ApplicationSettings.cs
+
+[ ] 5. Create all Interfaces in Repositories/IRepository/
+    [ ] IOracleConnectionFactory.cs
+    [ ] IEmailService.cs
+    [ ] IPdfGenerationService.cs
+    [ ] IEmailWorkflowService.cs
+    [ ] IPortfolioRepository.cs
+
+[ ] 6. Create Data layer
+    [ ] OracleConnectionFactory.cs
+
+[ ] 7. Create Repository layer
+    [ ] PortfolioRepository.cs (extract DB methods)
+
+[ ] 8. Create Service layer
+    [ ] EmailValidator.cs
+    [ ] MailKitEmailService.cs
+    [ ] PdfGenerationService.cs
+    [ ] EmailWorkflowService.cs
+    [ ] EmailWorkerService.cs
+
+[ ] 9. Create Program.cs with DI
+
+[ ] 10. Delete old Windows Forms files
+    [ ] *.Designer.cs
+    [ ] *.resx
+    [ ] Old Form class
+
+[ ] 11. Create Docker files
+    [ ] Dockerfile
+    [ ] docker-compose.yml
+    [ ] .dockerignore
+
+[ ] 12. Optimize SQL queries (see Section 14)
+
+[ ] 13. Test
+    [ ] Build succeeds
+    [ ] Configuration loads
+    [ ] Database connects
+    [ ] PDF generates
+    [ ] Email sends
+    [ ] Docker builds and runs
+
+================================================================================
+14. SQL QUERY OPTIMIZATION
+================================================================================
+
+This section covers SQL optimization strategies to reduce database round trips
+and improve application performance.
+
+--------------------------------------------------------------------------------
+14.1 QUERY CONSOLIDATION STRATEGY
+--------------------------------------------------------------------------------
+
+PROBLEM: Multiple queries hitting the same table/view
+
+BEFORE (16 separate queries per account):
+- GetUrGainAsync         -> SELECT SUM(ur_gain) FROM v_portfolio_all WHERE ur_gain > 0
+- GetUrLossAsync         -> SELECT SUM(ur_gain) FROM v_portfolio_all WHERE ur_gain < 0
+- GetAssetValueAllAsync  -> SELECT SUM(m_val) FROM v_portfolio_all
+- GetAssetValMarginAsync -> SELECT SUM(m_val) FROM v_portfolio_all WHERE margin='M'
+- GetFundWithdrawalAsync -> SELECT SUM(amount) FROM trans_ord WHERE tr_cd='WF'
+- GetCollectionAsync     -> SELECT SUM(amount) FROM trans_ord WHERE tr_cd='AD'
+- GetAccruedInterest     -> SELECT interest FROM dprofile
+- GetCurBalance          -> SELECT cur_bal FROM dprofile
+- GetAppliedInterest     -> SELECT SUM(amount) FROM fin_view WHERE tr_cd IN (...)
+- GetEarnedDivIncome     -> SELECT SUM(amount) FROM fin_view WHERE tr_cd IN (...)
+... and more
+
+AFTER (10 consolidated queries per account):
+
+1. GetPortfolioSummaryAsync (5 queries -> 1)
+   Combines: urgain, urloss, asset_val_all, asset_val_margin
+
+2. GetTransactionSummaryAsync (3 queries -> 1)
+   Combines: fund_withdraw, collection_in_transit
+
+3. GetAccountBalanceAsync (2 queries -> 1)
+   Combines: accured_interest, mbal
+
+4. GetFinancialSummaryAsync (2 queries -> 1)
+   Combines: applied_interest, earned_div_income
+
+RESULT: 8 database round-trips eliminated per account
+
+--------------------------------------------------------------------------------
+14.2 CONSOLIDATION PATTERNS
+--------------------------------------------------------------------------------
+
+PATTERN 1: Use CASE statements to combine aggregations
+
+BEFORE (2 queries):
+SELECT SUM(ur_gain) FROM view WHERE ur_gain > 0
+SELECT SUM(ur_gain) FROM view WHERE ur_gain < 0
+
+AFTER (1 query):
+SELECT
+    NVL(SUM(CASE WHEN ur_gain > 0 THEN ur_gain ELSE 0 END), 0) AS urgain,
+    NVL(SUM(CASE WHEN ur_gain < 0 THEN ur_gain ELSE 0 END), 0) AS urloss
+FROM view WHERE accnt_no = :accnt_no
+
+PATTERN 2: Combine same-table queries with different filters
+
+BEFORE (3 queries):
+SELECT SUM(amount) FROM trans_ord WHERE tr_cd = 'WF' AND dr_cr = 'D'
+SELECT SUM(amount) FROM trans_ord WHERE tr_cd = 'WF' AND dr_cr = 'D'  -- DUPLICATE!
+SELECT SUM(amount) FROM trans_ord WHERE tr_cd = 'AD'
+
+AFTER (1 query):
+SELECT
+    NVL(SUM(CASE WHEN tr_cd = 'WF' AND dr_cr = 'D' THEN amount ELSE 0 END), 0) AS fund_withdraw,
+    NVL(SUM(CASE WHEN tr_cd = 'AD' THEN amount ELSE 0 END), 0) AS collection_in_transit
+FROM invest.trans_ord WHERE accnt_no = :accnt_no
+
+PATTERN 3: Select multiple columns instead of multiple queries
+
+BEFORE (2 queries):
+SELECT interest FROM dprofile WHERE accnt_no = :id
+SELECT cur_bal FROM dprofile WHERE accnt_no = :id
+
+AFTER (1 query):
+SELECT
+    NVL(interest, 0) AS accured_interest,
+    NVL(cur_bal, 0) AS mbal
+FROM invest.dprofile WHERE accnt_no = :accnt_no
+
+--------------------------------------------------------------------------------
+14.3 PARALLEL QUERY EXECUTION
+--------------------------------------------------------------------------------
+
+Execute independent queries in parallel using Task.WhenAll():
+
+BEFORE (Sequential - slow):
+var purchasePower = await _repository.GetPurchasePowerAsync(accountNo);
+var loanRatio = await _repository.GetLoanRatioAsync();
+var marginDeposit = await _repository.GetMarginDepositAsync(accountNo);
+var portfolioSummary = await _repository.GetPortfolioSummaryAsync(accountNo);
+// ... each query waits for the previous one to complete
+
+AFTER (Parallel - fast):
+var purchasePowerTask = _repository.GetPurchasePowerAsync(accountNo, cancellationToken);
+var loanRatioTask = _repository.GetLoanRatioAsync(cancellationToken);
+var marginDepositTask = _repository.GetMarginDepositAsync(accountNo, cancellationToken);
+var portfolioSummaryTask = _repository.GetPortfolioSummaryAsync(accountNo, cancellationToken);
+var transactionSummaryTask = _repository.GetTransactionSummaryAsync(accountNo, cancellationToken);
+var accountBalanceTask = _repository.GetAccountBalanceAsync(accountNo, cancellationToken);
+var financialSummaryTask = _repository.GetFinancialSummaryAsync(accountNo, cancellationToken);
+var receivableFundTask = _repository.GetReceivableFundAsync(accountNo, cancellationToken);
+var ipoBlockBalanceTask = _repository.GetIPOBlockBalanceAsync(accountNo, cancellationToken);
+var receivableDividendTask = _repository.GetReceivableDividendAsync(accountNo, cancellationToken);
+
+// Execute all queries in parallel
+await Task.WhenAll(
+    purchasePowerTask, loanRatioTask, marginDepositTask, portfolioSummaryTask,
+    transactionSummaryTask, accountBalanceTask, financialSummaryTask,
+    receivableFundTask, ipoBlockBalanceTask, receivableDividendTask
+);
+
+// Retrieve results (already completed)
+var purchasePower = await purchasePowerTask;
+var loanRatio = await loanRatioTask;
+// ... etc
+
+--------------------------------------------------------------------------------
+14.4 SQL BEST PRACTICES
+--------------------------------------------------------------------------------
+
+1. Use explicit JOIN syntax instead of comma-separated tables:
+
+   BEFORE:
+   SELECT * FROM table_a a, table_b b WHERE a.id = b.id
+
+   AFTER:
+   SELECT * FROM table_a a
+   JOIN table_b b ON a.id = b.id
+
+2. Use ANSI SQL DATE literals:
+
+   BEFORE:
+   WHERE vouch_dt >= '01-jul-2022'
+
+   AFTER:
+   WHERE vouch_dt >= DATE '2022-07-01'
+
+3. Always use NVL/COALESCE for nullable aggregations:
+
+   BEFORE:
+   SELECT SUM(amount) FROM table
+
+   AFTER:
+   SELECT NVL(SUM(amount), 0) AS total_amount FROM table
+
+4. Remove unused parameters from method signatures:
+
+   BEFORE:
+   Task<DataTable?> GetDataAsync(int branchCode, int accountNo)  // branchCode not used
+
+   AFTER:
+   Task<DataTable?> GetDataAsync(int accountNo)
+
+5. Identify and remove duplicate queries:
+
+   If two methods have identical SQL, consolidate them into one.
+
+--------------------------------------------------------------------------------
+14.5 OPTIMIZATION CHECKLIST
+--------------------------------------------------------------------------------
+
+[ ] 1. Identify queries hitting the same table/view
+    [ ] List all queries by table name
+    [ ] Group queries that can be combined
+
+[ ] 2. Consolidate queries using CASE statements
+    [ ] Combine aggregations with different WHERE conditions
+    [ ] Combine multiple column selections
+
+[ ] 3. Remove duplicate queries
+    [ ] Compare SQL text of all queries
+    [ ] Remove methods with identical SQL
+
+[ ] 4. Remove unused parameters
+    [ ] Check each parameter is used in the SQL
+    [ ] Update method signatures and callers
+
+[ ] 5. Implement parallel execution
+    [ ] Create Task variables for each query
+    [ ] Use Task.WhenAll() for parallel execution
+    [ ] Await individual tasks to get results
+
+[ ] 6. Update interface
+    [ ] Add new consolidated methods
+    [ ] Remove old individual methods
+    [ ] Add XML documentation
+
+[ ] 7. Update service layer
+    [ ] Change method calls to use new consolidated methods
+    [ ] Extract multiple values from single query result
+    [ ] Test that output matches original
+
+================================================================================
+15. PERFORMANCE BEST PRACTICES
+================================================================================
+
+--------------------------------------------------------------------------------
+15.1 DATABASE CONNECTION MANAGEMENT
+--------------------------------------------------------------------------------
+
+- Use connection factory pattern for consistent connection handling
+- Always use 'using' statements for automatic disposal
+- Don't hold connections open longer than necessary
+- Use async methods (OpenAsync, ExecuteAsync)
+
+--------------------------------------------------------------------------------
+15.2 MEMORY OPTIMIZATION
+--------------------------------------------------------------------------------
+
+- Use Array.Empty<byte>() instead of new byte[0]
+- Use StringBuilder for string concatenation in loops
+- Dispose of large objects (DataTables, streams) promptly
+- Use value types (struct) for small, immutable data
+
+--------------------------------------------------------------------------------
+15.3 ASYNC/AWAIT BEST PRACTICES
+--------------------------------------------------------------------------------
+
+- Always pass CancellationToken through the call chain
+- Use ConfigureAwait(false) in library code
+- Don't use async void (except for event handlers)
+- Use Task.WhenAll for parallel operations
+
+--------------------------------------------------------------------------------
+15.4 LOGGING BEST PRACTICES
+--------------------------------------------------------------------------------
+
+- Use structured logging with named parameters
+- Log at appropriate levels (Debug, Info, Warning, Error)
+- Don't log sensitive data (passwords, connection strings)
+- Include correlation IDs for tracing
+
+--------------------------------------------------------------------------------
+15.5 FILES TO REMOVE (CLEANUP)
+--------------------------------------------------------------------------------
+
+Remove these unnecessary files from similar projects:
+
+1. SqlServerTypes/Loader.cs
+   - SQL Server spatial types helper
+   - Not needed for Oracle-only projects
+
+2. Models/[UnusedModel].cs
+   - Model classes that are defined but never referenced
+   - Check with "Find All References" before removing
+
+3. Unused RDLC templates
+   - Keep only actively used report templates
+   - Remove experimental/backup versions from source control
+
+4. Empty folders
+   - Remove folders that contain no files after cleanup
+
+================================================================================
+                              END OF DOCUMENT
+================================================================================

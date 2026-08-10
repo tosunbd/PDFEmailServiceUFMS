@@ -1,0 +1,75 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.10" />
+
+    <!-- Logging -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.1" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Thread" Version="4.0.0" />
+    <PackageReference Include="Serilog.Enrichers.Environment" Version="3.0.1" />
+
+    <!-- Email -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
+    <PackageReference Include="Polly" Version="8.7.0" />
+
+    <!-- Database -->
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.300" />
+
+    <!-- Reporting -->
+    <PackageReference Include="ReportViewerCore.NETCore" Version="15.1.33" />
+    <!-- Pinned: ReportViewerCore pulls 10.0.0 transitively, which has known CVEs -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+
+    <!-- Excel -->
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="appsettings.Production.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="RDLC\*.rdlc">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="RDLC\rptDSunitr003v1.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>rptDSunitr003v1.xsd</DependentUpon>
+    </Compile>
+    <Compile Update="RDLC\rptDSunitr004v1.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>rptDSunitr004v1.xsd</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="RDLC\rptDSunitr003v1.xsd">
+      <Generator>MSDataSetGenerator</Generator>
+      <LastGenOutput>rptDSunitr003v1.Designer.cs</LastGenOutput>
+    </None>
+    <None Update="RDLC\rptDSunitr004v1.xsd">
+      <Generator>MSDataSetGenerator</Generator>
+      <LastGenOutput>rptDSunitr004v1.Designer.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+</Project>
