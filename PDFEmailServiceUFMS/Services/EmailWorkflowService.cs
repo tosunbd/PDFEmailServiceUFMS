@@ -20,12 +20,12 @@ public class EmailWorkflowService : IEmailWorkflowService
     // ║              the normal sending loop runs and emails go to the real
     // ║              unit-holder addresses from the database.
     // ╚════════════════════════════════════════════════════════════════════════════╝
-    //private static readonly TestOverride? ActiveTestOverride = null;
-    private static readonly TestOverride? ActiveTestOverride = new(
-        Email: "tosuniscool@gmail.com",   // ← every email goes ONLY to this address
-        RegBk: "ICB",                 // ← only this registration is processed
-        RegBr: "1",
-        RegNo: "59005,59007");
+    private static readonly TestOverride? ActiveTestOverride = null;
+    //private static readonly TestOverride? ActiveTestOverride = new(
+    //    Email: "tosuniscool@gmail.com",   // ← every email goes ONLY to this address
+    //    RegBk: "ICB",                 // ← only this registration is processed
+    //    RegBr: "1",
+    //    RegNo: "57733");
 
     // Note: RegNo may also be a comma-separated list, e.g. "27112, 50727, 59005" —
     // one email is then sent per registration, all redirected to the test address.
