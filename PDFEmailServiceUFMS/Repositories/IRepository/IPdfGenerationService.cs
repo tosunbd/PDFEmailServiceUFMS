@@ -3,7 +3,7 @@ namespace PDFEmailServiceUFMS.Repositories.IRepository;
 public interface IPdfGenerationService
 {
     /// <summary>
-    /// Generates the Income Tax Certificate PDF (rptRSunitr004v1.rdlc).
+    /// Generates the Income Tax Certificate PDF.
     /// Returns an empty array when no data is found or rendering fails.
     /// </summary>
     Task<byte[]> GenerateIncomeTaxPdfAsync(
@@ -14,7 +14,7 @@ public interface IPdfGenerationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Generates the Investment Certificate PDF (rptRSunitr003v1.rdlc).
+    /// Generates the Investment Certificate PDF.
     /// Returns an empty array when no data is found or rendering fails.
     /// </summary>
     Task<byte[]> GenerateInvestmentCertificatePdfAsync(

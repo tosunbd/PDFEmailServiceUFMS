@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
@@ -28,10 +29,8 @@
     <!-- Database -->
     <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.300" />
 
-    <!-- Reporting -->
-    <PackageReference Include="ReportViewerCore.NETCore" Version="15.1.33" />
-    <!-- Pinned: ReportViewerCore pulls 10.0.0 transitively, which has known CVEs -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+    <!-- PDF generation (QuestPDF Community license) -->
+    <PackageReference Include="QuestPDF" Version="2025.7.0" />
 
     <!-- Excel -->
     <PackageReference Include="ClosedXML" Version="0.105.0" />
@@ -44,32 +43,9 @@
     <None Update="appsettings.Production.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="RDLC\*.rdlc">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Update="RDLC\rptDSunitr003v1.Designer.cs">
-      <DesignTime>True</DesignTime>
-      <AutoGen>True</AutoGen>
-      <DependentUpon>rptDSunitr003v1.xsd</DependentUpon>
-    </Compile>
-    <Compile Update="RDLC\rptDSunitr004v1.Designer.cs">
-      <DesignTime>True</DesignTime>
-      <AutoGen>True</AutoGen>
-      <DependentUpon>rptDSunitr004v1.xsd</DependentUpon>
-    </Compile>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Update="RDLC\rptDSunitr003v1.xsd">
-      <Generator>MSDataSetGenerator</Generator>
-      <LastGenOutput>rptDSunitr003v1.Designer.cs</LastGenOutput>
-    </None>
-    <None Update="RDLC\rptDSunitr004v1.xsd">
-      <Generator>MSDataSetGenerator</Generator>
-      <LastGenOutput>rptDSunitr004v1.Designer.cs</LastGenOutput>
+    <!-- Letterhead and signature images used by the QuestPDF certificates -->
+    <None Update="Assets\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 </Project>

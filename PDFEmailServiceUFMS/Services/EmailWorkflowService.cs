@@ -9,6 +9,34 @@ namespace PDFEmailServiceUFMS.Services;
 
 public class EmailWorkflowService : IEmailWorkflowService
 {
+    // ╔════════════════════════════════════════════════════════════════════════════╗
+    // ║ >>> TEST-OVERRIDE — CHANGE HERE FOR TESTING <<<        (search: TEST-OVERRIDE)
+    // ║
+    // ║ TEST MODE  : comment out the "= null;" line and uncomment the block below
+    // ║              it. Then EVERY email is redirected to the address given here,
+    // ║              and ONLY the given registration is processed (even if you
+    // ║              tick "Send to ALL" on the UI).
+    // ║ NORMAL MODE: keep "= null;" active and comment the test block back out —
+    // ║              the normal sending loop runs and emails go to the real
+    // ║              unit-holder addresses from the database.
+    // ╚════════════════════════════════════════════════════════════════════════════╝
+    //private static readonly TestOverride? ActiveTestOverride = null;
+    private static readonly TestOverride? ActiveTestOverride = new(
+        Email: "tosuniscool@gmail.com",   // ← every email goes ONLY to this address
+        RegBk: "ICB",                 // ← only this registration is processed
+        RegBr: "1",
+        RegNo: "59005,59007");
+
+    // Note: RegNo may also be a comma-separated list, e.g. "27112, 50727, 59005" —
+    // one email is then sent per registration, all redirected to the test address.
+    private sealed record TestOverride(string Email, string? RegBk = null, string? RegBr = null, string? RegNo = null);
+
+    /// <summary>Lets the UI show a warning banner while the TEST-OVERRIDE is active.</summary>
+    internal static string? TestOverrideDescription => ActiveTestOverride is null
+        ? null
+        : $"{ActiveTestOverride.Email}" +
+          (ActiveTestOverride.RegNo is null ? "" : $" (registration {ActiveTestOverride.RegBk}/{ActiveTestOverride.RegBr}/{ActiveTestOverride.RegNo} only)");
+
     private readonly IUnitFundRepository _repository;
     private readonly IPdfGenerationService _pdfService;
     private readonly IEmailService _emailService;
@@ -32,32 +60,67 @@ public class EmailWorkflowService : IEmailWorkflowService
         _logger = logger;
     }
 
-    public async Task ExecuteAsync(CancellationToken cancellationToken = default)
+    public async Task<WorkflowResult> ExecuteAsync(WorkflowRequest request, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting Tax & Investment Certificate email workflow");
+        void Report(string message)
+        {
+            _logger.LogInformation("{Message}", message);
+            progress?.Report(message);
+        }
+
+        Report("Starting Tax & Investment Certificate email workflow");
 
         if (_appSettings.DryRun)
         {
-            _logger.LogWarning("DRY RUN mode is ON - no emails will be sent to anyone");
+            Report("DRY RUN mode is ON - no emails will be sent to anyone");
         }
 
-        // Resolve financial year (from database, falling back to configuration)
-        var finYearResult = await _repository.GetFinancialYearAsync(cancellationToken);
-        string finYear = finYearResult?.Rows.Count > 0
-            ? finYearResult.Rows[0]["FIN_YEAR"]?.ToString() ?? _appSettings.FinancialYear
-            : _appSettings.FinancialYear;
+        if (ActiveTestOverride is not null)
+        {
+            Report($"*** TEST-OVERRIDE ACTIVE *** all emails redirected to {ActiveTestOverride.Email}");
+            if (ActiveTestOverride is { RegBk: not null, RegBr: not null, RegNo: not null })
+            {
+                Report($"*** TEST-OVERRIDE *** only registration {ActiveTestOverride.RegBk}/{ActiveTestOverride.RegBr}/{ActiveTestOverride.RegNo} will be processed");
+                request = new WorkflowRequest(request.FinYear, SendToAll: false,
+                    ActiveTestOverride.RegBk, ActiveTestOverride.RegBr, ActiveTestOverride.RegNo);
+            }
+        }
 
-        _logger.LogInformation("Using financial year: {FinYear}", finYear);
+        // Resolve financial year (from the request; falls back to DB max, then configuration)
+        var finYear = request.FinYear;
+        if (string.IsNullOrWhiteSpace(finYear))
+        {
+            var finYearResult = await _repository.GetFinancialYearAsync(cancellationToken);
+            finYear = finYearResult?.Rows.Count > 0
+                ? finYearResult.Rows[0]["FIN_YEAR"]?.ToString() ?? _appSettings.FinancialYear
+                : _appSettings.FinancialYear;
+        }
 
-        var accountEmails = await LoadRecipientsAsync(finYear, cancellationToken);
+        Report($"Using financial year: {finYear}");
 
-        // Result columns for the Excel report
+        var accountEmails = request.SendToAll
+            ? await LoadRecipientsAsync(finYear, cancellationToken)
+            : await LoadSpecificRecipientsAsync(request, finYear, Report, cancellationToken);
+
+        // Result columns for the Excel report and the printable sent-status log
         if (!accountEmails.Columns.Contains("Tax"))
             accountEmails.Columns.Add("Tax", typeof(string));
         if (!accountEmails.Columns.Contains("Investment"))
             accountEmails.Columns.Add("Investment", typeof(string));
+        if (!accountEmails.Columns.Contains("Status"))
+            accountEmails.Columns.Add("Status", typeof(string));
+        if (!accountEmails.Columns.Contains("SENT_EMAIL"))
+            accountEmails.Columns.Add("SENT_EMAIL", typeof(string));
 
-        _logger.LogInformation("Processing {Count} email recipients", accountEmails.Rows.Count);
+        var totalRecipients = accountEmails.Rows.Count;
+        Report($"Processing {totalRecipients} email recipient(s)");
+
+        if (!request.SendToAll && totalRecipients == 0)
+        {
+            Report($"No recipient found for registration(s) {request.RegBk}/{request.RegBr}/{request.RegNo} " +
+                   $"in {finYear} (needs NET_DIVIDENT > 0 for that year)");
+            return new WorkflowResult(0, 0, 0);
+        }
 
         var currentPath = AppContext.BaseDirectory;
         var pdfOutputPath = _appSettings.PdfOutputPath;
@@ -77,7 +140,7 @@ public class EmailWorkflowService : IEmailWorkflowService
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                _logger.LogWarning("Cancellation requested, stopping workflow");
+                Report("Cancellation requested, stopping workflow");
                 break;
             }
 
@@ -87,10 +150,22 @@ public class EmailWorkflowService : IEmailWorkflowService
             var accountEmail = accountEmails.Rows[i]["EMAIL"]?.ToString()?.Trim() ?? "";
             var cipFlag = accountEmails.Rows[i]["CIP_FLAG"]?.ToString()?.Trim() ?? "N";
 
+            // ── TEST-OVERRIDE: redirect the "to" address ──────────────────────────
+            if (ActiveTestOverride is not null)
+            {
+                accountEmail = ActiveTestOverride.Email;
+            }
+            // ──────────────────────────────────────────────────────────────────────
+
+            accountEmails.Rows[i]["SENT_EMAIL"] = accountEmail;
+            accountEmails.Rows[i]["Status"] = "NO";
+
             if (string.IsNullOrWhiteSpace(regBk) || string.IsNullOrWhiteSpace(regBr) ||
                 string.IsNullOrWhiteSpace(regNo) || string.IsNullOrWhiteSpace(accountEmail))
             {
-                _logger.LogWarning("Skipping row {Index} - missing registration or email", i);
+                Report($"Skipping row {i} - missing registration or email");
+                accountEmails.Rows[i]["Tax"] = "No";
+                accountEmails.Rows[i]["Investment"] = "No";
                 continue;
             }
 
@@ -101,35 +176,47 @@ public class EmailWorkflowService : IEmailWorkflowService
 
                 accountEmails.Rows[i]["Tax"] = sent && taxAttached ? "Yes" : "No";
                 accountEmails.Rows[i]["Investment"] = sent && investAttached ? "Yes" : "No";
+                accountEmails.Rows[i]["Status"] = sent ? "YES" : "NO";
 
                 if (sent)
+                {
                     successCount++;
+                    Report($"[{i + 1}/{totalRecipients}] {regBk}/{regBr}/{regNo} → {accountEmail} : " +
+                           $"SENT (Tax={(taxAttached ? "Yes" : "No")}, Investment={(investAttached ? "Yes" : "No")})");
+                }
                 else
+                {
                     failureCount++;
+                    Report($"[{i + 1}/{totalRecipients}] {regBk}/{regBr}/{regNo} → {accountEmail} : NOT SENT");
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process account {RegBk}/{RegBr}/{RegNo} for email {Email}",
                     regBk, regBr, regNo, accountEmail);
+                progress?.Report($"[{i + 1}/{totalRecipients}] {regBk}/{regBr}/{regNo} → {accountEmail} : ERROR - {ex.Message}");
                 accountEmails.Rows[i]["Tax"] = "No";
                 accountEmails.Rows[i]["Investment"] = "No";
                 failureCount++;
             }
 
             // Delay after every batch to prevent SMTP throttling
-            if ((i + 1) % _appSettings.EmailBatchSize == 0)
+            if ((i + 1) % _appSettings.EmailBatchSize == 0 && i + 1 < accountEmails.Rows.Count)
             {
-                _logger.LogInformation("Processed {Count} emails, waiting {Minutes} minutes before next batch...",
-                    i + 1, _appSettings.BatchDelayMinutes);
+                Report($"Processed {i + 1} emails, waiting {_appSettings.BatchDelayMinutes} minutes before next batch...");
                 await Task.Delay(TimeSpan.FromMinutes(_appSettings.BatchDelayMinutes), cancellationToken);
             }
         }
 
         // Export results to Excel
-        await ExportToExcelAsync(accountEmails, cancellationToken);
+        await ExportToExcelAsync(accountEmails, Report, cancellationToken);
 
-        _logger.LogInformation("Email workflow completed. Success: {Success}, Failures: {Failures}",
-            successCount, failureCount);
+        // Printable sent-status log for the admin
+        await WriteSentLogAsync(accountEmails, logOutputPath, finYear, Report);
+
+        Report($"Email workflow completed. Success: {successCount}, Failures: {failureCount}");
+
+        return new WorkflowResult(totalRecipients, successCount, failureCount);
     }
 
     private async Task<DataTable> LoadRecipientsAsync(string finYear, CancellationToken cancellationToken)
@@ -145,15 +232,7 @@ public class EmailWorkflowService : IEmailWorkflowService
             accountEmails = await _repository.GetAccountEmailAsync(finYear, cancellationToken);
         }
 
-        if (accountEmails == null)
-        {
-            accountEmails = new DataTable();
-            accountEmails.Columns.Add("REG_BK", typeof(string));
-            accountEmails.Columns.Add("REG_BR", typeof(string));
-            accountEmails.Columns.Add("REG_NO", typeof(string));
-            accountEmails.Columns.Add("EMAIL", typeof(string));
-            accountEmails.Columns.Add("CIP_FLAG", typeof(string));
-        }
+        accountEmails ??= CreateEmptyRecipientTable();
 
         // Add test accounts from configuration (CIP_FLAG = 'Y' so both certificates are attempted)
         foreach (var testAccount in _appSettings.TestAccounts)
@@ -180,6 +259,59 @@ public class EmailWorkflowService : IEmailWorkflowService
         accountEmails.AcceptChanges();
 
         return accountEmails;
+    }
+
+    /// <summary>
+    /// "Specific registration" mode: no TestAccounts appended. RegNo may be a single
+    /// number or a comma-separated list (e.g. "27112, 50727, 59005") — one email is
+    /// sent per registration number, in the order given.
+    /// </summary>
+    private async Task<DataTable> LoadSpecificRecipientsAsync(WorkflowRequest request, string finYear, Action<string> report, CancellationToken cancellationToken)
+    {
+        var table = CreateEmptyRecipientTable();
+
+        var regNos = (request.RegNo ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct()
+            .ToList();
+
+        foreach (var regNo in regNos)
+        {
+            var result = await _repository.GetAccountEmailByRegistrationAsync(
+                request.RegBk ?? "", request.RegBr ?? "", regNo, finYear, cancellationToken);
+
+            if (result is { Rows.Count: > 0 })
+            {
+                foreach (DataRow row in result.Rows)
+                {
+                    var newRow = table.NewRow();
+                    newRow["REG_BK"] = row["REG_BK"]?.ToString();
+                    newRow["REG_BR"] = row["REG_BR"]?.ToString();
+                    newRow["REG_NO"] = row["REG_NO"]?.ToString();
+                    newRow["EMAIL"] = row["EMAIL"] == DBNull.Value ? DBNull.Value : row["EMAIL"]?.ToString();
+                    newRow["CIP_FLAG"] = row["CIP_FLAG"]?.ToString();
+                    table.Rows.Add(newRow);
+                }
+            }
+            else
+            {
+                report($"No recipient found for registration {request.RegBk}/{request.RegBr}/{regNo} " +
+                       $"in {finYear} (needs NET_DIVIDENT > 0 for that year) - skipped");
+            }
+        }
+
+        return table;
+    }
+
+    private static DataTable CreateEmptyRecipientTable()
+    {
+        var table = new DataTable();
+        table.Columns.Add("REG_BK", typeof(string));
+        table.Columns.Add("REG_BR", typeof(string));
+        table.Columns.Add("REG_NO", typeof(string));
+        table.Columns.Add("EMAIL", typeof(string));
+        table.Columns.Add("CIP_FLAG", typeof(string));
+        return table;
     }
 
     /// <returns>
@@ -243,7 +375,16 @@ public class EmailWorkflowService : IEmailWorkflowService
             return (false, false, false);
         }
 
-        var subject = string.Format(_emailSettings.SubjectTemplate, $"{regBk}/{regBr}/{regNo}");
+        // Subject reflects what is actually attached:
+        // both -> "Income Tax & Investment Certificate...", tax only -> "Income Tax Certificate...", etc.
+        var subjectTemplate = (taxPdf.Length > 0, investPdf.Length > 0) switch
+        {
+            (true, true) => _emailSettings.SubjectTemplate,
+            (true, false) => _emailSettings.SubjectTemplateTaxOnly,
+            (false, true) => _emailSettings.SubjectTemplateInvestmentOnly,
+            _ => _emailSettings.SubjectTemplate
+        };
+        var subject = string.Format(subjectTemplate, $"{regBk}/{regBr}/{regNo}");
         var body = _emailSettings.BodyTemplate;
 
         if (_appSettings.DryRun)
@@ -273,7 +414,67 @@ public class EmailWorkflowService : IEmailWorkflowService
         return (result.Success, taxPdf.Length > 0, investPdf.Length > 0);
     }
 
-    private async Task ExportToExcelAsync(DataTable accountEmails, CancellationToken cancellationToken)
+    /// <summary>
+    /// Writes the printable per-run report logs/ufmsTaxInvestEmailSent_*.txt:
+    /// one line per registration showing which certificates were attached, whether
+    /// the email was sent, and the address it was sent to. Written even after a
+    /// cancellation so partial runs can still be reported to the admin.
+    /// </summary>
+    private async Task WriteSentLogAsync(DataTable accountEmails, string logOutputPath, string finYear, Action<string> report)
+    {
+        try
+        {
+            var path = Path.Combine(logOutputPath, $"ufmsTaxInvestEmailSent_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+
+            var lines = new List<string>
+            {
+                "ICB Unit Fund Department - Income Tax & Investment Certificate Email Report",
+                $"Run at         : {DateTime.Now:dd-MMM-yyyy HH:mm:ss}",
+                $"Financial Year : {finYear}"
+            };
+            if (_appSettings.DryRun)
+                lines.Add("NOTE: DRY RUN was ON - no email was actually sent.");
+            if (ActiveTestOverride is not null)
+                lines.Add($"NOTE: TEST-OVERRIDE was ON - all emails were redirected to {ActiveTestOverride.Email}.");
+
+            var separator = new string('-', 110);
+            lines.Add(separator);
+            lines.Add($"{"REG_BK",-8}{"REG_BR",-8}{"REG_NO",-10}{"TAX_CERT",-10}{"INVESTMENT_CERT",-17}{"STATUS(SENT)",-14}EMAIL");
+            lines.Add(separator);
+
+            int sentCount = 0, notSentCount = 0;
+            foreach (DataRow row in accountEmails.Rows)
+            {
+                var regBk = row["REG_BK"]?.ToString()?.Trim() ?? "";
+                var regBr = row["REG_BR"]?.ToString()?.Trim() ?? "";
+                var regNo = row["REG_NO"]?.ToString()?.Trim() ?? "";
+                var tax = (row["Tax"]?.ToString() ?? "No").ToUpperInvariant();
+                var invest = (row["Investment"]?.ToString() ?? "No").ToUpperInvariant();
+                var status = string.IsNullOrWhiteSpace(row["Status"]?.ToString()) ? "NO" : row["Status"]!.ToString()!;
+                var email = row["SENT_EMAIL"]?.ToString();
+                if (string.IsNullOrWhiteSpace(email))
+                    email = row["EMAIL"]?.ToString()?.Trim() ?? "";
+
+                if (status == "YES") sentCount++; else notSentCount++;
+
+                lines.Add($"{regBk,-8}{regBr,-8}{regNo,-10}{tax,-10}{invest,-17}{status,-14}{email}");
+            }
+
+            lines.Add(separator);
+            lines.Add($"Total: {accountEmails.Rows.Count}    Sent: {sentCount}    Not sent: {notSentCount}");
+
+            // CancellationToken.None: this report must be written even when the run was cancelled
+            await File.WriteAllLinesAsync(path, lines, CancellationToken.None);
+
+            report($"Sent-status log saved to {path}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to write sent-status log");
+        }
+    }
+
+    private async Task ExportToExcelAsync(DataTable accountEmails, Action<string> report, CancellationToken cancellationToken)
     {
         try
         {
@@ -289,7 +490,7 @@ public class EmailWorkflowService : IEmailWorkflowService
 
             await Task.Run(() => workbook.SaveAs(excelPath), cancellationToken);
 
-            _logger.LogInformation("Excel report saved to {Path}", excelPath);
+            report($"Excel report saved to {excelPath}");
         }
         catch (Exception ex)
         {

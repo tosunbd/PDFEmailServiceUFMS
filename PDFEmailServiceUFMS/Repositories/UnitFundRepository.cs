@@ -22,6 +22,12 @@ public class UnitFundRepository : IUnitFundRepository
         return await ExecuteQueryAsync(sql, Array.Empty<OracleParameter>(), cancellationToken);
     }
 
+    public async Task<DataTable?> GetFinancialYearsAsync(CancellationToken cancellationToken = default)
+    {
+        const string sql = @"SELECT DISTINCT FIN_YEAR FROM UNIT_DIVIDEND WHERE FIN_YEAR IS NOT NULL ORDER BY FIN_YEAR DESC";
+        return await ExecuteQueryAsync(sql, Array.Empty<OracleParameter>(), cancellationToken);
+    }
+
     public async Task<DataTable?> GetIncomeTaxRuleNameAsync(string finYear, CancellationToken cancellationToken = default)
     {
         const string sql = @"SELECT INCOME_TAX_RULE_NAME FROM UNIT_PARAMETERS WHERE FIN_YEAR = :V_FIN_YEAR";
@@ -52,6 +58,40 @@ public class UnitFundRepository : IUnitFundRepository
                 UK.REG_BK, UK.REG_BR, UK.REG_NO";
 
         return await ExecuteQueryAsync(sql, new[] { new OracleParameter("V_FIN_YEAR", finYear) }, cancellationToken);
+    }
+
+    public async Task<DataTable?> GetAccountEmailByRegistrationAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default)
+    {
+        // No email-format filter here: the single-registration mode should still find the
+        // account so a missing/invalid email can be reported (or redirected by the test override).
+        const string sql = @"
+            SELECT
+                UK.REG_BK, UK.REG_BR, UK.REG_NO, EMAIL,
+                MAX(CASE WHEN UD.CIP_FLAG = 'Y' THEN 'Y' ELSE 'N' END) CIP_FLAG
+            FROM
+                UNIT_KYC UK
+            JOIN
+                UNIT_DIVIDEND UD ON UK.REG_BK = UD.REG_BK
+                                  AND UK.REG_BR = UD.REG_BR
+                                  AND UK.REG_NO = UD.REG_NO
+            WHERE
+                UD.NET_DIVIDENT > 0
+                AND UD.FIN_YEAR = :V_FIN_YEAR
+                AND UK.REG_BK = :V_REG_BK
+                AND UK.REG_BR = :V_REG_BR
+                AND UK.REG_NO = :V_REG_NO
+            GROUP BY
+                UK.REG_BK, UK.REG_BR, UK.REG_NO, EMAIL";
+
+        var parameters = new[]
+        {
+            new OracleParameter("V_FIN_YEAR", finYear),
+            new OracleParameter("V_REG_BK", regBk),
+            new OracleParameter("V_REG_BR", regBr),
+            new OracleParameter("V_REG_NO", regNo)
+        };
+
+        return await ExecuteQueryAsync(sql, parameters, cancellationToken);
     }
 
     public async Task<DataTable?> GetDividendDataAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default)

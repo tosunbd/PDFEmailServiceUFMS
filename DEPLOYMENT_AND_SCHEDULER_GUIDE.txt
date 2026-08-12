@@ -106,8 +106,9 @@ C:\Services\PDFEmailService\
 ├── PDFEmailService.dll
 ├── PDFEmailService.runtimeconfig.json
 ├── appsettings.json             (IMPORTANT: Update settings for production!)
-├── RDLC\
-│   └── rptRSPortfolioLastHU.rdlc
+├── Assets\
+│   ├── letterhead.jpg           (ICB letterhead for certificate PDFs)
+│   └── signature.png            (signing officer's signature)
 ├── logs\                        (created automatically)
 └── PDF\                         (created automatically)
 
@@ -316,7 +317,7 @@ ISSUE: Email sending fails
 
 ISSUE: PDF generation fails
 --------------------------------------
-1. Verify RDLC files exist in RDLC\ folder
+1. Verify letterhead.jpg and signature.png exist in Assets\ folder
 2. Check if fonts are installed on server
 3. Review logs for specific error messages
 

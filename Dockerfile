@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /app/logs /app/PDF
 
 COPY --from=publish /app/publish .
-COPY PDFEmailServiceUFMS/RDLC /app/RDLC
 
 ENV DOTNET_RUNNING_IN_CONTAINER=true
 ENV ASPNETCORE_ENVIRONMENT=Production

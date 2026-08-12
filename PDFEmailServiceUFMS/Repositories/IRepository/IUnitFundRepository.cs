@@ -10,6 +10,12 @@ public interface IUnitFundRepository
     Task<DataTable?> GetFinancialYearAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Gets all distinct financial years from UNIT_DIVIDEND in descending order
+    /// (used to populate the FIN_YEAR dropdown on the UI).
+    /// </summary>
+    Task<DataTable?> GetFinancialYearsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets the income tax rule name for a given financial year.
     /// </summary>
     Task<DataTable?> GetIncomeTaxRuleNameAsync(string finYear, CancellationToken cancellationToken = default);
@@ -20,6 +26,13 @@ public interface IUnitFundRepository
     /// dividends as CIP units and therefore also gets an Investment Certificate).
     /// </summary>
     Task<DataTable?> GetAccountEmailAsync(string finYear, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a single account (with email and CIP_FLAG) for a specific registration
+    /// (REG_BK / REG_BR / REG_NO) that has dividend data for the financial year.
+    /// Used by the "specific registration" send mode. Returns null when not found.
+    /// </summary>
+    Task<DataTable?> GetAccountEmailByRegistrationAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets dividend data for income tax certificate generation.

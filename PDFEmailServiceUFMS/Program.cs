@@ -5,60 +5,77 @@ using PDFEmailServiceUFMS.Data;
 using PDFEmailServiceUFMS.Repositories;
 using PDFEmailServiceUFMS.Repositories.IRepository;
 using PDFEmailServiceUFMS.Services;
+using PDFEmailServiceUFMS.UI;
 using Serilog;
 
-// Configure Serilog early for startup logging
-Log.Logger = new LoggerConfiguration()
-    .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .CreateBootstrapLogger();
+namespace PDFEmailServiceUFMS;
 
-try
+internal static class Program
 {
-    Log.Information("Starting UFMS Tax & Investment Certificate Email Service");
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        // Configure Serilog early for startup logging
+        Log.Logger = new LoggerConfiguration()
+            .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+            .CreateBootstrapLogger();
 
-    var builder = Host.CreateApplicationBuilder(args);
+        try
+        {
+            Log.Information("Starting UFMS Tax & Investment Certificate Email Service");
 
-    // Configure Serilog from configuration
-    builder.Services.AddSerilog((services, lc) => lc
-        .ReadFrom.Configuration(builder.Configuration)
-        .ReadFrom.Services(services)
-        .Enrich.FromLogContext()
-        .Enrich.WithMachineName()
-        .Enrich.WithThreadId()
-        .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-        .WriteTo.File(
-            path: "logs/ufmscertemailservice-.log",
-            rollingInterval: RollingInterval.Day,
-            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{ThreadId}] {Message:lj}{NewLine}{Exception}"));
+            var builder = Host.CreateApplicationBuilder(args);
 
-    // Configure options
-    builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
-    builder.Services.Configure<RetryPolicySettings>(builder.Configuration.GetSection("RetryPolicy"));
-    builder.Services.Configure<ApplicationSettings>(builder.Configuration.GetSection("Application"));
+            // Configure Serilog from configuration
+            builder.Services.AddSerilog((services, lc) => lc
+                .ReadFrom.Configuration(builder.Configuration)
+                .ReadFrom.Services(services)
+                .Enrich.FromLogContext()
+                .Enrich.WithMachineName()
+                .Enrich.WithThreadId()
+                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+                .WriteTo.File(
+                    path: "logs/ufmscertemailservice-.log",
+                    rollingInterval: RollingInterval.Day,
+                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{ThreadId}] {Message:lj}{NewLine}{Exception}"));
 
-    // Register data access
-    builder.Services.AddSingleton<IOracleConnectionFactory, OracleConnectionFactory>();
+            // Configure options
+            builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
+            builder.Services.Configure<RetryPolicySettings>(builder.Configuration.GetSection("RetryPolicy"));
+            builder.Services.Configure<ApplicationSettings>(builder.Configuration.GetSection("Application"));
 
-    // Register repositories
-    builder.Services.AddScoped<IUnitFundRepository, UnitFundRepository>();
+            // Register data access
+            builder.Services.AddSingleton<IOracleConnectionFactory, OracleConnectionFactory>();
 
-    // Register services
-    builder.Services.AddScoped<IEmailService, MailKitEmailService>();
-    builder.Services.AddScoped<IPdfGenerationService, PdfGenerationService>();
-    builder.Services.AddScoped<IEmailWorkflowService, EmailWorkflowService>();
+            // Register repositories
+            builder.Services.AddScoped<IUnitFundRepository, UnitFundRepository>();
 
-    // Register hosted service
-    builder.Services.AddHostedService<EmailWorkerService>();
+            // Register services
+            builder.Services.AddScoped<IEmailService, MailKitEmailService>();
+            builder.Services.AddScoped<IPdfGenerationService, PdfGenerationService>();
+            builder.Services.AddScoped<IEmailWorkflowService, EmailWorkflowService>();
 
-    var host = builder.Build();
+            // Register UI
+            builder.Services.AddTransient<MainForm>();
 
-    await host.RunAsync();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "UFMS Tax & Investment Certificate Email Service terminated unexpectedly");
-}
-finally
-{
-    Log.CloseAndFlush();
+            // The host is only used as a DI/configuration/logging container -
+            // the WinForms message loop below drives the application instead.
+            using var host = builder.Build();
+
+            Application.SetHighDpiMode(HighDpiMode.SystemAware);
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(host.Services.GetRequiredService<MainForm>());
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "UFMS Tax & Investment Certificate Email Service terminated unexpectedly");
+            MessageBox.Show(ex.ToString(), "UFMS Certificate Email Service - Fatal Error",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            Log.CloseAndFlush();
+        }
+    }
 }
