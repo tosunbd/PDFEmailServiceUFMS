@@ -52,7 +52,8 @@ Single project, constructor-injected services registered in `Program.cs`, interf
 ### Certificate PDFs (QuestPDF)
 
 - Both certificates are composed in code in `Services/PdfGenerationService.cs` (the RDLC reports were removed; they exist in git history if the old layout is ever needed).
-- `Assets/letterhead.jpg` (scanned ICB letterhead) and `Assets/signature.png` (signing officer) are copied to the output directory and loaded from `<BaseDirectory>/Assets/` at runtime; if missing, the PDF falls back to a text-only header / blank signature space.
+- The letterhead is drawn as real text (Bengali title, gold English title, Bengali/English address lines) beside `Assets/ICBLogo.jpg`; `Assets/signature.png` is the signing officer's signature. Both images are copied to the output directory and loaded from `<BaseDirectory>/Assets/` at runtime; if missing, the logo is skipped / blank signature space is left.
+- Bengali text needs a Bangla-capable font on the machine: it tries Kalpurush first, then Nirmala UI (ships with Windows 10/11), Shonar Bangla, Vrinda.
 - The signing officer's name/title are constants at the top of `PdfGenerationService` (`SignatoryName` / `SignatoryTitle`) — change these plus `Assets/signature.png` when the signatory changes.
 - The whole "(2) Deduction of income tax…" note on the tax certificate comes verbatim from `UNIT_PARAMETERS.INCOME_TAX_RULE_NAME`; the investment certificate's note (2) is static text with the credit year (`FIN_YEAR + 1`) substituted in.
 

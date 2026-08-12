@@ -9,16 +9,28 @@ namespace PDFEmailServiceUFMS.Services;
 
 /// <summary>
 /// Generates the Income Tax and Investment Certificate PDFs with QuestPDF:
-/// scanned ICB letterhead on top, Unit Fund Department title, boxed
-/// registration number, particulars table, numbered notes and the
-/// signature block.
+/// ICB letterhead (logo + Bengali/English titles and address, drawn as text)
+/// on top, Unit Fund Department title, boxed registration number, particulars
+/// table, numbered notes and the signature block.
 /// </summary>
 public class PdfGenerationService : IPdfGenerationService
 {
     private const string SignatoryName = "Md. Golam Mostofa";
     private const string SignatoryTitle = "Assistant General Manager";
 
-    private static readonly Lazy<byte[]?> LetterheadImage = new(() => LoadAsset("letterhead.jpg"));
+    // Letterhead text (matches the original scanned ICB letterhead)
+    private const string BanglaTitle = "ইনভেস্টমেন্ট কর্পোরেশন অব বাংলাদেশ";
+    private const string BanglaAddress = "৮, ডি আই টি এভিনিউ ( লেভেল ১৪-২১), ঢাকা, বাংলাদেশ, পিএবিএক্স : ৯৫৬৩৪৫৫ (অটো হান্টিং), ফ্যাক্স : ৮৮-০২-৯৫৬৩৩১৩";
+    private const string EnglishAddress = "8, DIT AVENUE (Level 14-21), DHAKA, BANGLADESH, PABX : 9563455 (AUTO HUNTING), FAX : 88-02-9563313, E-mail : info@icb.gov.bd";
+
+    // Bengali-capable font stack: Kalpurush (classic Bangla look), falling back
+    // to Nirmala UI which ships with Windows 10/11
+    private static readonly string[] BanglaFonts = { "Kalpurush", "Nirmala UI", "Shonar Bangla", "Vrinda" };
+
+    private static readonly QuestPDF.Infrastructure.Color GoldColor = QuestPDF.Infrastructure.Color.FromHex("#A5872B");
+    private static readonly QuestPDF.Infrastructure.Color InkColor = QuestPDF.Infrastructure.Color.FromHex("#1F1F1F");
+
+    private static readonly Lazy<byte[]?> LogoImage = new(() => LoadAsset("ICBLogo.jpg"));
     private static readonly Lazy<byte[]?> SignatureImage = new(() => LoadAsset("signature.png"));
 
     private readonly IUnitFundRepository _repository;
@@ -391,18 +403,8 @@ public class PdfGenerationService : IPdfGenerationService
 
                     page.Content().Column(column =>
                     {
-                        // Scanned ICB letterhead (logo + Bengali/English name + address)
-                        if (LetterheadImage.Value is { } letterhead)
-                        {
-                            column.Item().Image(letterhead).FitWidth();
-                        }
-                        else
-                        {
-                            column.Item().AlignCenter().Text("INVESTMENT CORPORATION OF BANGLADESH")
-                                .FontSize(16).Bold();
-                            column.Item().AlignCenter().Text("8, DIT Avenue (Level 14-21), Dhaka, Bangladesh")
-                                .FontSize(9);
-                        }
+                        // ICB letterhead: logo on the left, titles + address as real text
+                        column.Item().Element(ComposeLetterhead);
 
                         column.Item().PaddingTop(22).AlignCenter()
                             .Text("Unit Fund Department").FontSize(14).Bold().Underline();
@@ -421,6 +423,66 @@ public class PdfGenerationService : IPdfGenerationService
             _logger.LogError(ex, "Error rendering {ReportKind} PDF report", reportKind);
             return Array.Empty<byte>();
         }
+    }
+
+    /// <summary>
+    /// The ICB letterhead, drawn as text so no scanned image is needed:
+    /// round emblem on the left; Bengali title, gold English title and the
+    /// Bengali/English address lines beside it — same layout as the original.
+    /// </summary>
+    private static void ComposeLetterhead(IContainer container)
+    {
+        container.Column(header =>
+        {
+            header.Item().Row(row =>
+            {
+                row.ConstantItem(2);
+
+                if (LogoImage.Value is { } logo)
+                    row.ConstantItem(82).AlignMiddle().Image(logo).FitWidth();
+                else
+                    row.ConstantItem(82);
+
+                row.RelativeItem().PaddingLeft(12).Column(text =>
+                {
+                    text.Item().AlignCenter().Text(BanglaTitle)
+                        .FontFamily(BanglaFonts).FontSize(20).Bold().FontColor(InkColor);
+
+                    text.Item().PaddingTop(2).LineHorizontal(1f).LineColor(InkColor);
+
+                    text.Item().PaddingTop(3).AlignCenter().Text(t =>
+                    {
+                        t.DefaultTextStyle(s => s.FontFamily("Times New Roman").FontColor(GoldColor).Bold());
+                        AppendSmallCaps(t, "Investment");
+                        t.Span("  ");
+                        AppendSmallCaps(t, "Corporation");
+                        t.Span("  ");
+                        t.Span("OF").FontSize(12f);
+                        t.Span("  ");
+                        AppendSmallCaps(t, "Bangladesh");
+                    });
+
+                    text.Item().PaddingTop(3).LineHorizontal(1f).LineColor(InkColor);
+
+                    // Height + ScaleToFit force each address onto a single line, as in the original
+                    text.Item().PaddingTop(4).Height(12).ScaleToFit().AlignCenter().Text(BanglaAddress)
+                        .FontFamily(BanglaFonts).FontSize(8.2f).FontColor(InkColor);
+
+                    text.Item().PaddingTop(1).Height(10).ScaleToFit().AlignCenter().Text(EnglishAddress)
+                        .FontFamily("Arial Narrow", "Arial").FontSize(7.4f).FontColor(InkColor);
+                });
+            });
+
+            // thin rule closing the letterhead, as in the original
+            header.Item().PaddingTop(6).LineHorizontal(0.9f).LineColor(Colors.Grey.Darken2);
+        });
+    }
+
+    /// <summary>Small-caps effect for the gold English title: bigger first letter, smaller rest.</summary>
+    private static void AppendSmallCaps(TextDescriptor t, string word)
+    {
+        t.Span(word[..1].ToUpperInvariant()).FontSize(16.5f);
+        t.Span(word[1..].ToUpperInvariant()).FontSize(12f);
     }
 
     /// <summary>Letter No. + Date row, boxed Registration No., and the Mr./Mrs./Miss. addressee block.</summary>
