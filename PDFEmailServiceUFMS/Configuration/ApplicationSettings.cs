@@ -12,6 +12,20 @@ public class ApplicationSettings
     public List<TestAccount> TestAccounts { get; set; } = new();
 
     /// <summary>
+    /// Memo number printed at the top left of a certificate. A {FIN_YEAR}
+    /// placeholder is replaced with the financial year of the run. Mirrors the
+    /// CertificateLetterNo keys in the UFMS Web.config, so a number changed
+    /// there should be changed here too.
+    /// </summary>
+    public string CertificateLetterNo { get; set; } = "53.13.0000.000.018.56.0001.26";
+
+    /// <summary>Overrides <see cref="CertificateLetterNo"/> on the Income Tax Certificate.</summary>
+    public string CertificateLetterNoIncomeTax { get; set; } = "";
+
+    /// <summary>Overrides <see cref="CertificateLetterNo"/> on the Investment Certificate.</summary>
+    public string CertificateLetterNoInvestment { get; set; } = "53.13.0000,000,018.56.0002.26";
+
+    /// <summary>
     /// When true, everything runs normally (queries, PDF generation, Excel report)
     /// but NO email is sent to anyone. Use for safe testing.
     /// </summary>

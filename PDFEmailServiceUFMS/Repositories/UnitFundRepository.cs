@@ -35,6 +35,33 @@ public class UnitFundRepository : IUnitFundRepository
         return await ExecuteQueryAsync(sql, parameters, cancellationToken);
     }
 
+    public async Task<DataTable?> GetInvestmentRuleNameAsync(string finYear, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"SELECT INVESTMENT_RULE_NAME FROM UNIT_PARAMETERS WHERE FIN_YEAR = :V_FIN_YEAR";
+        var parameters = new[] { new OracleParameter("V_FIN_YEAR", finYear) };
+        return await ExecuteQueryAsync(sql, parameters, cancellationToken);
+    }
+
+    public async Task<DataTable?> GetChallanListAsync(string finYear, CancellationToken cancellationToken = default)
+    {
+        // Approved challans of the year, oldest first - the tax payment table on
+        // the Income Tax Certificate. Same rows the UFMS checker screen shows.
+        const string sql = @"
+            SELECT
+                C.SERIAL, C.CHALLAN_NO, C.CHALLAN_DATE, B.BANK_NAME, BR.BRANCH_NAME
+            FROM UNIT_CHALLAN C
+            LEFT JOIN UNIT_BANK_INFO B
+                ON B.BANK_ID = C.BANK_ID
+            LEFT JOIN UNIT_BRANCH_INFO BR
+                ON BR.BANK_ID = C.BANK_ID
+               AND TO_CHAR(BR.BRANCH_ID) = TRIM(C.BRANCH_ID)
+            WHERE TRIM(C.FIN_YEAR) = TRIM(:V_FIN_YEAR)
+            ORDER BY C.SERIAL";
+
+        var parameters = new[] { new OracleParameter("V_FIN_YEAR", finYear) };
+        return await ExecuteQueryAsync(sql, parameters, cancellationToken);
+    }
+
     public async Task<DataTable?> GetAccountEmailAsync(string finYear, CancellationToken cancellationToken = default)
     {
         const string sql = @"
@@ -94,84 +121,32 @@ public class UnitFundRepository : IUnitFundRepository
         return await ExecuteQueryAsync(sql, parameters, cancellationToken);
     }
 
-    public async Task<DataTable?> GetDividendDataAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default)
+    public async Task<DataTable?> GetHolderCertificateDataAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default)
     {
+        // Same query as UFMS GET_HOLDER_CERTIFICATE_DATA (unitf059v1): one row
+        // serves both the Income Tax and the Investment Certificate.
         const string sql = @"
-            SELECT
-                UM.REG_BK,
-                UM.REG_BR,
-                UM.REG_NO,
-                UM.NAME1,
-                UM.DOB1,
-                UM.NAME2,
-                UM.NAME3,
-                UM.NAME4,
-                UM.EMAIL,
-                UM.NID1,
-                UM.ETIN1,
-                UM.PASSPORT_NO1,
-                UM.GENDER1,
-                UM.TELE_OFFICE,
-                UM.TELE_RES,
-                UM.TELE_CELL,
-                UM.CONTACT_ADDRSS1,
-                UM.CONTACT_ADDRSS2,
-                UM.CONTACT_ADDRSS3,
-                TO_CHAR(UD.WARRENT_DATE, 'DD/MM/YYYY') AS WARRENT_DATE,
-                UD.WARRENT_NUMBER,
-                UD.NO_OF_CIP_UNIT,
-                UD.CIP_RATE,
-                (UD.NO_OF_CIP_UNIT * UD.CIP_RATE) AS AMOUNT,
-                UD.BALANCE,
-                UD.DIVIDEND_RATE,
-                UD.GROSS_DIVIDEND,
-                '@Tk. ' || UD.TAX || '%' AS TAX,
-                UD.TAX_DEDUCTION,
-                (UD.GROSS_DIVIDEND - UD.TAX_DEDUCTION) AS NET_DIVIDENT,
-                UD.FIN_YEAR,
-                UD.YEAR_END_DATE
-            FROM
-                V_UNIT_DIVIDEND_ALL UD
-            JOIN
-                UNIT_KYC UM
-                ON UM.REG_BK = UD.REG_BK
-               AND UM.REG_BR = UD.REG_BR
-               AND UM.REG_NO = UD.REG_NO
-            WHERE
-                UM.REG_BK = :V_REG_BK
-                AND UM.REG_BR = :V_REG_BR
-                AND UM.REG_NO = :V_REG_NO
-                AND UD.FIN_YEAR = :V_FIN_YEAR";
-
-        var parameters = new[]
-        {
-            new OracleParameter("V_REG_BK", regBk),
-            new OracleParameter("V_REG_BR", regBr),
-            new OracleParameter("V_REG_NO", regNo),
-            new OracleParameter("V_FIN_YEAR", finYear)
-        };
-
-        return await ExecuteQueryAsync(sql, parameters, cancellationToken);
-    }
-
-    public async Task<DataTable?> GetInvestmentCertificateDataAsync(string regBk, string regBr, string regNo, string finYear, CancellationToken cancellationToken = default)
-    {
-        const string sql = @"
-            SELECT UM.REG_BK, UM.REG_BR, UM.REG_NO, UM.NAME1, UM.NAME2, UM.NAME3, UM.NAME4,
-                UM.CONTACT_ADDRSS1, UM.CONTACT_ADDRSS2, UM.CONTACT_ADDRSS3,
-                TO_CHAR(UD.WARRENT_DATE, 'DD/MM/YYYY') WARRENT_DATE,
-                UD.WARRENT_NUMBER, UD.NO_OF_CIP_UNIT, UD.CIP_RATE,
-                (UD.NO_OF_CIP_UNIT * UD.CIP_RATE) AMOUNT, UD.FIN_YEAR, UD.YEAR_END_DATE
+            SELECT UM.REG_BK, UM.REG_BR, UM.REG_NO,
+                   UM.NAME1, UM.NAME2, UM.NAME3, UM.NAME4,
+                   UM.CONTACT_ADDRSS1, UM.CONTACT_ADDRSS2, UM.CONTACT_ADDRSS3,
+                   UM.ETIN1,
+                   TO_CHAR(UD.WARRENT_DATE, 'DD/MM/YYYY') WARRENT_DATE,
+                   UD.BALANCE, UD.DIVIDEND_RATE, UD.GROSS_DIVIDEND,
+                   '@Tk. ' || UD.TAX || '%' TAX_LABEL,
+                   UD.TAX_DEDUCTION,
+                   (UD.GROSS_DIVIDEND - UD.TAX_DEDUCTION) NET_DIVIDENT,
+                   UD.FIN_YEAR, UD.YEAR_END_DATE,
+                   UD.NO_OF_CIP_UNIT, UD.CIP_RATE,
+                   (UD.NO_OF_CIP_UNIT * UD.CIP_RATE) AMOUNT
             FROM UNIT_KYC UM
             JOIN V_UNIT_DIVIDEND_ALL UD
                 ON UM.REG_BK = UD.REG_BK
-                AND UM.REG_BR = UD.REG_BR
-                AND UM.REG_NO = UD.REG_NO
-            WHERE
-                UM.REG_BK = :V_REG_BK
-                AND UM.REG_BR = :V_REG_BR
-                AND UM.REG_NO = :V_REG_NO
-                AND UD.FIN_YEAR = :V_FIN_YEAR";
+               AND UM.REG_BR = UD.REG_BR
+               AND UM.REG_NO = UD.REG_NO
+            WHERE UM.REG_BK = :V_REG_BK
+              AND UM.REG_BR = :V_REG_BR
+              AND UM.REG_NO = :V_REG_NO
+              AND UD.FIN_YEAR = :V_FIN_YEAR";
 
         var parameters = new[]
         {
