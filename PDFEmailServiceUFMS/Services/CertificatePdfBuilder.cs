@@ -104,8 +104,6 @@ public static class CertificatePdfBuilder
         if (!string.IsNullOrWhiteSpace(data.Etin))
             view.EtinLine = "e-TIN No- " + data.Etin.Trim();
 
-        var yearEndStr = FormatMyDate(data.YearEndDate, includeComma: false);
-
         if (type == IncomeTaxType)
         {
             view.Title = "Income Tax Certificate";
@@ -154,7 +152,7 @@ public static class CertificatePdfBuilder
 
             view.BodyText =
                 "This is to certify that the Corporation has issued ICB Unit Certificates under CIP " +
-                "against the net dividend income for the financial year ended " + yearEndStr + " to the " +
+                "against the net dividend income for the financial year ended " + FormatPlainDate(data.YearEndDate) + " to the " +
                 "above unit holder. The particulars are as follows:";
 
             view.TableHeaders.Add("Date of Issue");
