@@ -25,7 +25,7 @@ public class EmailWorkflowService : IEmailWorkflowService
     //    Email: "tosuniscool@gmail.com",   // ← every email goes ONLY to this address
     //    RegBk: "ICB",                 // ← only this registration is processed
     //    RegBr: "1",
-    //    RegNo: "57733");
+    //    RegNo: "59007");
 
     // Note: RegNo may also be a comma-separated list, e.g. "27112, 50727, 59005" —
     // one email is then sent per registration, all redirected to the test address.

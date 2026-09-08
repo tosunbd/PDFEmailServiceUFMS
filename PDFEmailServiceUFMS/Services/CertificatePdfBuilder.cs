@@ -5,6 +5,7 @@ using PDFEmailServiceUFMS.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using SkiaSharp;
 
 namespace PDFEmailServiceUFMS.Services;
 
@@ -52,6 +53,8 @@ public static class CertificatePdfBuilder
     private const float PageMarginTop = 24;
     private const float PageMarginBottom = 26;
     private const float PageMarginHorizontal = 42;
+    private static readonly float PageContentWidth =
+        PageSizes.A4.Width - 2 * PageMarginHorizontal;
     private static readonly float PageContentHeight =
         PageSizes.A4.Height - PageMarginTop - PageMarginBottom;
 
@@ -97,7 +100,7 @@ public static class CertificatePdfBuilder
                 view.AddressLines.Add(address.Trim());
         }
 
-        // Both certificates carry the holder's e-TIN under the names.
+        // Both certificates carry the holder's e-TIN as the last line of the addressee block.
         if (!string.IsNullOrWhiteSpace(data.Etin))
             view.EtinLine = "e-TIN No- " + data.Etin.Trim();
 
@@ -110,7 +113,7 @@ public static class CertificatePdfBuilder
 
             view.BodyText =
                 "This is to certify that Investment Corporation of Bangladesh has paid the dividend " +
-                "to the above-mentioned unit holder for the financial year ended " +
+                "to the above mentioned unit holder for the financial year ended " +
                 FormatPlainDate(data.YearEndDate) + " (declared on " +
                 FormatWarrantDate(data.WarrantDate) + "). The particulars are as follows:";
 
@@ -367,7 +370,7 @@ public static class CertificatePdfBuilder
 
                     ComposeSubject(column, view.Subject);
 
-                    column.Item().PaddingTop(12).Text(view.BodyText).LineHeight(1.25f);
+                    column.Item().PaddingTop(12).Element(c => ComposeJustifiedParagraph(c, view.BodyText, PageContentWidth));
 
                     column.Item().PaddingTop(12).Table(table =>
                     {
@@ -377,8 +380,13 @@ public static class CertificatePdfBuilder
                                 c.RelativeColumn();
                         });
 
+                        // AlignCenter inside the text centres each wrapped line (e.g. "(Tk.)")
                         foreach (var header in view.TableHeaders)
-                            table.Cell().Element(HeaderCell).Text(header);
+                            table.Cell().Element(HeaderCell).Text(t =>
+                            {
+                                t.AlignCenter();
+                                t.Span(header);
+                            });
 
                         foreach (var value in view.TableValues)
                             table.Cell().Element(ValueCell).Text(value);
@@ -457,16 +465,16 @@ public static class CertificatePdfBuilder
     /// <summary>Letter No. + Date row, boxed Registration No., and the Mr./Mrs./Miss. addressee block.</summary>
     private static void ComposeLetterAndAddressee(ColumnDescriptor column, CertificateView view)
     {
-        // The e-TIN belongs to the holder, so it closes the name block with no
-        // gap; the blank line before the address stays as in the original.
+        // One flush-left stack, line after line with no gaps: the salutation,
+        // the names, the address, and the holder's e-TIN closing the block.
         var sb = new StringBuilder();
+        sb.AppendLine("Mr./Mrs./Miss.");
         foreach (var name in view.NameLines)
             sb.AppendLine(name);
-        if (!string.IsNullOrWhiteSpace(view.EtinLine))
-            sb.AppendLine(view.EtinLine);
-        sb.AppendLine();
         foreach (var address in view.AddressLines)
             sb.AppendLine(address);
+        if (!string.IsNullOrWhiteSpace(view.EtinLine))
+            sb.AppendLine(view.EtinLine);
         var nameAddress = sb.ToString().Trim();
 
         column.Item().PaddingTop(14).Row(row =>
@@ -474,11 +482,7 @@ public static class CertificatePdfBuilder
             row.RelativeItem().Column(left =>
             {
                 left.Item().Text(view.LetterNo);
-                left.Item().PaddingTop(10).Row(r =>
-                {
-                    r.AutoItem().Text("Mr./Mrs./Miss.");
-                    r.RelativeItem().PaddingLeft(16).Text(nameAddress).LineHeight(1.2f);
-                });
+                left.Item().PaddingTop(10).Text(nameAddress).LineHeight(1.2f);
             });
 
             // Narrow enough that a full address line still fits beside it
@@ -488,6 +492,76 @@ public static class CertificatePdfBuilder
                 right.Item().PaddingTop(8).Border(1).PaddingVertical(5).PaddingHorizontal(8)
                     .AlignCenter().Text($"Registration No.:  {view.RegistrationNo}").SemiBold();
             });
+        });
+    }
+
+    /// <summary>
+    /// A paragraph justified so both edges line up (the body text and the
+    /// numbered notes). Ported from UFMS unchanged: there QuestPDF 2022.12 has
+    /// no justification of its own, so the words are measured with Skia,
+    /// broken into lines against the given width, and every full line is laid
+    /// out as a row of words with equal stretching gaps. QuestPDF 2025 could
+    /// justify by itself, but it breaks lines a little later than that
+    /// measurement does, and the emailed certificate must wrap exactly where
+    /// the one printed from UFMS wraps - hence the same routine, measuring
+    /// with the same SkiaSharp version. The last line stays flush left, as
+    /// in any justified paragraph.
+    /// </summary>
+    private static void ComposeJustifiedParagraph(IContainer container, string text, float availableWidth)
+    {
+        const float fontSize = 11f;
+        const float lineHeight = 1.25f;
+
+        var lines = new List<List<string>>();
+        using (var paint = new SKPaint())
+        {
+            paint.Typeface = SKTypeface.FromFamilyName("Arial");
+            paint.TextSize = fontSize;
+            float spaceWidth = paint.MeasureText(" ");
+
+            var current = new List<string>();
+            float currentWidth = 0;
+            foreach (var word in (text ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                float wordWidth = paint.MeasureText(word);
+                float widthIfAdded = current.Count == 0 ? wordWidth : currentWidth + spaceWidth + wordWidth;
+                // 1pt of slack keeps rounding from ever overfilling a row
+                if (current.Count > 0 && widthIfAdded > availableWidth - 1)
+                {
+                    lines.Add(current);
+                    current = new List<string>();
+                    widthIfAdded = wordWidth;
+                }
+                current.Add(word);
+                currentWidth = widthIfAdded;
+            }
+            if (current.Count > 0)
+                lines.Add(current);
+        }
+
+        container.Column(paragraph =>
+        {
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var words = lines[i];
+                bool isLast = i == lines.Count - 1;
+
+                if (isLast || words.Count == 1)
+                {
+                    paragraph.Item().Text(string.Join(" ", words)).LineHeight(lineHeight);
+                    continue;
+                }
+
+                paragraph.Item().Row(row =>
+                {
+                    for (int w = 0; w < words.Count; w++)
+                    {
+                        row.AutoItem().Text(words[w]).LineHeight(lineHeight);
+                        if (w < words.Count - 1)
+                            row.RelativeItem();
+                    }
+                });
+            }
         });
     }
 
@@ -503,16 +577,21 @@ public static class CertificatePdfBuilder
     /// <summary>The numbered notes, each with its "(n)" marker in a column of its own.</summary>
     private static void ComposeNotes(ColumnDescriptor column, CertificateView view)
     {
+        const float markerWidth = 26;
+
         for (int i = 0; i < view.Notes.Count; i++)
         {
             var note = view.Notes[i];
+            bool hasMarker = !string.IsNullOrEmpty(note.Marker);
 
             column.Item().PaddingTop(i == 0 ? 12 : 8).Row(row =>
             {
-                if (!string.IsNullOrEmpty(note.Marker))
-                    row.ConstantItem(26).Text(note.Marker);
+                if (hasMarker)
+                    row.ConstantItem(markerWidth).Text(note.Marker);
 
-                row.RelativeItem().Text(note.Text).LineHeight(1.25f);
+                // justified like the body paragraph, within the width left beside the marker
+                float textWidth = PageContentWidth - (hasMarker ? markerWidth : 0);
+                row.RelativeItem().Element(c => ComposeJustifiedParagraph(c, note.Text, textWidth));
             });
         }
     }

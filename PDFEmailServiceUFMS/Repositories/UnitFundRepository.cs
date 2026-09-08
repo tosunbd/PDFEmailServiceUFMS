@@ -146,7 +146,8 @@ public class UnitFundRepository : IUnitFundRepository
             WHERE UM.REG_BK = :V_REG_BK
               AND UM.REG_BR = :V_REG_BR
               AND UM.REG_NO = :V_REG_NO
-              AND UD.FIN_YEAR = :V_FIN_YEAR";
+              AND UD.FIN_YEAR = :V_FIN_YEAR
+              AND UD.TAX = 15";
 
         var parameters = new[]
         {

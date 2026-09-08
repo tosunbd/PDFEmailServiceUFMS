@@ -31,6 +31,9 @@
 
     <!-- PDF generation (QuestPDF Community license) -->
     <PackageReference Include="QuestPDF" Version="2025.7.0" />
+    <!-- Word measurement for the justified paragraphs: the same library and
+         version UFMS measures with, so both certificates break lines alike -->
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
 
     <!-- Excel -->
     <PackageReference Include="ClosedXML" Version="0.105.0" />

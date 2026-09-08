@@ -24,7 +24,7 @@ public sealed class CertificateView
     public List<string> NameLines { get; } = new();
     public List<string> AddressLines { get; } = new();
 
-    /// <summary>"e-TIN No- ..." closing the name block; empty = not shown.</summary>
+    /// <summary>"e-TIN No- ..." last line of the addressee block; empty = not shown.</summary>
     public string EtinLine { get; set; } = "";
 
     public string BodyText { get; set; } = "";
