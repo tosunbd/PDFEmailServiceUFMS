@@ -9,6 +9,15 @@ public class EmailSettings
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
     public string FromAddress { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Minimum gap between two messages on the same SMTP connection. The BCC relay throttles
+    /// per client, so back-to-back sends trip its rate limiter. 0 disables the pacing.
+    /// </summary>
+    public int DelayBetweenEmailsMs { get; set; } = 400;
+
+    /// <summary>Socket timeout for connect, login and send. MailKit's own default is 120s.</summary>
+    public int SmtpTimeoutSeconds { get; set; } = 120;
     /// <summary>Subject when BOTH certificates are attached. {0} = REG_BK/REG_BR/REG_NO.</summary>
     public string SubjectTemplate { get; set; } = "Income Tax & Investment Certificate of Registration No. ( {0} )";
 
